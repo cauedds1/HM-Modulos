@@ -189,6 +189,7 @@
     <button class="navbtn ativo" data-aba="diag" data-min="consulta"><span class="ic">🔍</span>Diagnóstico</button>
     <button class="navbtn" data-aba="sync" data-min="operador"><span class="ic">🔗</span>Sincronismo</button>
     <button class="navbtn" data-aba="restaurar" data-min="responsavel"><span class="ic">🔢</span>Restaurar KM<span class="tag">resp.</span></button>
+    <button class="navbtn" data-aba="airbag" data-min="responsavel"><span class="ic">🛡️</span>Airbag<span class="tag">resp.</span></button>
     <div class="navsep"></div>
     <button class="navbtn" data-aba="reg" data-min="consulta"><span class="ic">📓</span>Registro</button>
     <button class="navbtn" data-aba="laudo" data-min="responsavel"><span class="ic">📄</span>Laudo<span class="tag">resp.</span></button>
@@ -264,6 +265,27 @@
           <div id="restAlerta"></div>
           <div class="acoes"><button class="btn" id="btnRestaurar" disabled>Gravar quilometragem</button><button class="trocar" id="restTrocar" type="button">trocar arquivo</button></div>
           <div class="veto" style="margin-top:14px"><b>Por que ainda não grava:</b> depende do mesmo código de proteção (P1b). O fluxo, as travas e o registro já funcionam; só o passo final de escrever fica pendente.</div>
+        </div>
+      </div></div>
+    </section>
+
+    <!-- AIRBAG (finalizar reparo / crash data) -->
+    <section class="aba" id="aba-airbag">
+      <div class="card"><h2>🛡️ Finalizar reparo de airbag</h2><div class="corpo">
+        <div class="veto" style="margin-bottom:16px"><b>Segurança — leia antes.</b> Limpar o crash data faz o módulo voltar a indicar "airbag ok". Isso só é seguro <b>depois</b> de o sistema de airbag ter sido <b>fisicamente reparado ou substituído</b> (airbags, pré-tensionadores, módulo). Fazer sem o reparo físico deixa um carro que não dispara o airbag na próxima batida. Por isso esta operação exige a declaração de reparo e fica registrada.</div>
+        <div id="airDrop"><div class="drop" id="dropAir" tabindex="0"><span class="ic">📂</span><div class="h">Arquivo do módulo de airbag</div><div class="s">32 KB</div></div></div>
+        <div id="airForm" hidden>
+          <div class="linha"><span class="rot">Módulo</span><span class="val" id="airMod">—</span></div>
+          <div class="linha"><span class="rot">Chassi</span><span class="val" id="airVin">—</span></div>
+          <div class="campo" style="margin-top:14px"><label>Declaração obrigatória</label>
+            <label style="display:flex;gap:9px;align-items:flex-start;font-family:var(--grot);font-size:.88rem;font-weight:400;cursor:pointer">
+              <input type="checkbox" id="airDecl" style="margin-top:3px;accent-color:var(--petroleo)">
+              <span>Declaro que o sistema de airbag deste veículo foi <b>fisicamente reparado ou substituído</b> e está apto a funcionar.</span></label>
+          </div>
+          <div class="campo"><label>O que foi reparado (obrigatório)</label><input id="airReparo" placeholder="Ex.: trocados os 2 airbags dianteiros e os pré-tensionadores"></div>
+          <div id="airAlerta"></div>
+          <div class="acoes"><button class="btn" id="btnAirbag" disabled>Finalizar reparo (limpar crash data)</button><button class="trocar" id="airTrocar" type="button">trocar arquivo</button></div>
+          <div class="veto" style="margin-top:14px"><b>Por que ainda não executa:</b> depende do código de proteção do airbag (P1b) e de mapear onde fica o crash data — o que precisa de um dump de airbag <em>batido</em> para comparar. O fluxo, a declaração e o registro já funcionam; só o passo de limpar fica pendente.</div>
         </div>
       </div></div>
     </section>
@@ -467,6 +489,33 @@ document.getElementById("btnRestaurar").addEventListener("click",async()=>{
   alert("Registrado. A gravação em si depende do código de proteção (P1b) — ainda não é aplicada. Tudo o que você preencheu ficou no registro.");
 });
 
+/* ========== AIRBAG — finalizar reparo (crash data) ========== */
+let airState=null;
+const inpAir=ligarDrop(document.getElementById("dropAir"),f=>lerArquivo(f,b=>{
+  const slot=detectarPerfil(b);
+  if(slot!=="airbag"){ alert("Este arquivo não é um módulo de airbag (esperado 32 KB)."); return; }
+  const res=analisar(slot,b); airState={nome:f.name,res};
+  document.getElementById("airDrop").hidden=true;document.getElementById("airForm").hidden=false;
+  document.getElementById("airMod").textContent=res.perfil.modulo;
+  document.getElementById("airVin").textContent=res.vin;
+  validarAir();
+}));
+function validarAir(){
+  const decl=document.getElementById("airDecl").checked;
+  const reparo=document.getElementById("airReparo").value.trim();
+  const alerta=document.getElementById("airAlerta");
+  alerta.innerHTML = os ? "" : '<div class="aviso" style="margin-top:10px">Vincule uma OS antes de finalizar.</div>';
+  document.getElementById("btnAirbag").disabled = !(decl && reparo && os);
+}
+document.getElementById("airDecl").addEventListener("change",validarAir);
+document.getElementById("airReparo").addEventListener("input",validarAir);
+document.getElementById("airTrocar").addEventListener("click",()=>inpAir.click());
+document.getElementById("btnAirbag").addEventListener("click",async()=>{
+  const reparo=document.getElementById("airReparo").value.trim();
+  await regAdicionar("Finalizar reparo airbag (pendente P1b)",airState.res.perfil.modulo+" · "+airState.res.vin+" · reparo declarado",{arquivo:airState.nome,vin:airState.res.vin,reparoFisico:true,reparoDescricao:reparo});
+  alert("Registrado com a declaração de reparo físico. A limpeza do crash data em si depende do código de proteção (P1b) e do mapeamento — ainda não é aplicada. A declaração e o registro já ficaram guardados.");
+});
+
 /* ========== LAUDO ========== */
 document.getElementById("btnGerarLaudo").addEventListener("click",()=>{
   if(!os){ alert("Vincule uma OS primeiro."); return; }
@@ -502,13 +551,14 @@ document.getElementById("btnSalvarOS").addEventListener("click",()=>{
   if(!num){ alert("Informe o número da OS."); return; }
   os={numero:num,placa:document.getElementById("osPlaca").value.trim(),modelo:document.getElementById("osModelo").value.trim(),cliente:document.getElementById("osCliente").value.trim()};
   try{localStorage.setItem("hm-os",JSON.stringify(os));}catch(e){}
-  document.getElementById("ovOS").hidden=true; pintarOS(); validarRest();
+  document.getElementById("ovOS").hidden=true; pintarOS(); validarRest(); validarAir();
 });
 
 /* ========== NAV + PERMISSÕES ========== */
 const titulos={diag:["Diagnóstico","Abra um arquivo de módulo para ler chassi, quilometragem e integridade."],
   sync:["Sincronismo","Compare painel e airbag do mesmo carro e resolva a divergência."],
   restaurar:["Restaurar KM","Gravar a quilometragem comprovada numa troca de módulo. Operação restrita."],
+  airbag:["Airbag","Finalizar o reparo do airbag, com declaração de reparo físico. Operação restrita."],
   reg:["Registro","O caderninho encadeado de tudo que foi feito."],
   laudo:["Laudo","Comprovante do serviço para o cliente e para a OS."],
   chave:["Chave e imobilizador","Antifurto — em estudo."],

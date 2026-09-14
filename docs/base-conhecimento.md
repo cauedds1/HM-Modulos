@@ -2,10 +2,10 @@
 
 > Documento de memória do projeto. Reúne tudo que foi levantado no estudo,
 > para que na hora de construir nada se perca. Atualizado a cada nova
-> informação. **Estado atual: ESTUDO / MAPEAMENTO — nada de código sendo
-> construído até o escopo fechar.**
+> informação. **Estado atual: CONSTRUÇÃO (etapa E3) — motor testado e
+> esqueleto do programa em andamento; gravação aguarda o material da E1.**
 
-Última atualização: 28 ago 2026 (ver diário de evolução na seção 8)
+Última atualização: 14 set 2026 (ver diário de evolução na seção 8)
 
 ---
 
@@ -325,3 +325,23 @@ Documento próprio: `docs/referencia-iprog.md`. Pontos que mudam a estratégia:
   `referencia-iprog.md`. Ideias novas possíveis: rádio/multimídia,
   extração de PIN, conversão milhas→km. Flags mantidas (mesma linha da KM):
   crash data sem reparo e DPF OFF ficam fora por segurança/lei.
+
+### 14 set 2026 — airbag crash data incluído (só na forma documentada)
+
+Decisão do cliente: **incluir** a limpeza de crash data do airbag, mas
+**nunca na forma crua**. Sai da lista de "fora de escopo" e entra como
+operação restrita, com salvaguarda de segurança:
+
+- Só o responsável técnico acessa (aba "Airbag").
+- Exige **declaração obrigatória de reparo físico** do sistema de airbag
+  (airbags, pré-tensionadores, módulo) antes de liberar.
+- Exige descrição do que foi reparado e OS vinculada.
+- Fica **registrado** (com a declaração) e entra no laudo.
+- O botão cru "batido → limpo" sem reparo **não existe** — não tem uso
+  legítimo e deixaria um carro que não dispara o airbag.
+
+Estado técnico: a operação (fluxo + declaração + registro) já está no app,
+mas a limpeza em si fica **pendente** — depende do código de proteção do
+airbag (P1b) e de **mapear onde fica o crash data**, o que exige um dump de
+airbag **batido** para comparar com um limpo. Novo item de material a pedir
+ao mecânico.
