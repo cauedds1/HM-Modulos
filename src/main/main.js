@@ -20,8 +20,14 @@ const fs = require('fs');
 
 const perfilMod = require('../core/perfil');
 const leitor = require('../core/leitor');
+const armazenamento = require('../core/armazenamento');
 
 let janela = null;
+
+// Onde o registro fica guardado: pasta de dados do app, na máquina da oficina.
+function caminhoRegistro() {
+  return path.join(app.getPath('userData'), 'registro.json');
+}
 
 function criarJanela() {
   janela = new BrowserWindow({
@@ -68,6 +74,11 @@ ipcMain.handle('modulo:salvar', async (_ev, { sugestao, bytes }) => {
   fs.writeFileSync(filePath, Buffer.from(bytes));
   return { salvo: true, caminho: filePath };
 });
+
+// Registro persistente (o caderninho): só acrescenta e lista; nunca apaga.
+ipcMain.handle('registro:adicionar', (_ev, dados) => armazenamento.adicionar(caminhoRegistro(), dados));
+ipcMain.handle('registro:listar', () => armazenamento.carregar(caminhoRegistro()));
+ipcMain.handle('registro:verificar', () => armazenamento.verificar(caminhoRegistro()));
 
 app.whenReady().then(() => {
   criarJanela();

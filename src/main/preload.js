@@ -15,4 +15,10 @@ contextBridge.exposeInMainWorld('motor', {
   analisar: (bytes) => ipcRenderer.invoke('modulo:analisar', bytes),
   // Salva um arquivo corrigido (nunca sobrescreve o original)
   salvar: (sugestao, bytes) => ipcRenderer.invoke('modulo:salvar', { sugestao, bytes }),
+  // Registro persistente (caderninho) — só acrescenta e lê
+  registro: {
+    adicionar: (dados) => ipcRenderer.invoke('registro:adicionar', dados),
+    listar: () => ipcRenderer.invoke('registro:listar'),
+    verificar: () => ipcRenderer.invoke('registro:verificar'),
+  },
 });
