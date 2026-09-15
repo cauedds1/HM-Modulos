@@ -353,8 +353,34 @@ const AIR_CRASH_REG=[[15466,14],[15586,14],[15706,14],[15874,14],[16442,14],[171
 const AIR_CRASH_HDR=[0xd3,0x43,0xb5,0x76];
 function airColisao(b){for(const [off,tam] of AIR_CRASH_REG)for(let i=0;i<tam;i++){const esp=i<4?AIR_CRASH_HDR[i]:0;if(b[off+i]!==esp)return true;}return false;}
 function airLimparCrash(b){const out=b.slice();for(const [off,tam] of AIR_CRASH_REG)for(let i=0;i<tam;i++)out[off+i]=i<4?AIR_CRASH_HDR[i]:0;return out;}
-/* baixa um arquivo binario (o corrigido) sem tocar no original */
-function baixar(nome,bytes){const blob=new Blob([bytes],{type:"application/octet-stream"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=nome;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);}
+/* ZIP (armazenado, sem compressao) para entregar o .bin no app publicado,
+   onde o download direto e bloqueado e a lista de extensoes nao aceita .bin. */
+function zipCrc(bytes){let c=0xFFFFFFFF>>>0;for(const b of bytes)c=(PSA_TAB[(c^b)&0xff]^(c>>>8))>>>0;return (c^0xFFFFFFFF)>>>0;}
+function _u16(v){return [v&0xff,(v>>>8)&0xff];}
+function _u32(v){return [v&0xff,(v>>>8)&0xff,(v>>>16)&0xff,(v>>>24)&0xff];}
+function zipUmArquivo(nome,bytes){
+  const nb=new TextEncoder().encode(nome), crc=zipCrc(bytes), n=bytes.length;
+  const lfh=[0x50,0x4b,0x03,0x04,..._u16(20),..._u16(0),..._u16(0),..._u16(0),..._u16(0),..._u32(crc),..._u32(n),..._u32(n),..._u16(nb.length),..._u16(0)];
+  const cdh=[0x50,0x4b,0x01,0x02,..._u16(20),..._u16(20),..._u16(0),..._u16(0),..._u16(0),..._u16(0),..._u32(crc),..._u32(n),..._u32(n),..._u16(nb.length),..._u16(0),..._u16(0),..._u16(0),..._u16(0),..._u32(0),..._u32(0)];
+  const cdStart=lfh.length+nb.length+n, cdLen=cdh.length+nb.length;
+  const eocd=[0x50,0x4b,0x05,0x06,..._u16(0),..._u16(0),..._u16(1),..._u16(1),..._u32(cdLen),..._u32(cdStart),..._u16(0)];
+  const parts=[new Uint8Array(lfh),nb,bytes,new Uint8Array(cdh),nb,new Uint8Array(eocd)];
+  let total=0;for(const p of parts)total+=p.length;const out=new Uint8Array(total);let o=0;for(const p of parts){out.set(p,o);o+=p.length;}
+  return out;
+}
+/* Download adaptativo: no app publicado usa a capacidade oficial (zip);
+   no navegador comum e no .exe, download direto do .bin. Nunca toca no original. */
+async function baixar(nome,bytes){
+  if(window.claude&&typeof window.claude.use==="function"){
+    let dl=null; try{dl=await window.claude.use("downloads");}catch(e){}
+    if(dl){
+      try{ await dl.save({filename:nome.replace(/\.bin$/i,"")+".zip",data:zipUmArquivo(nome,bytes)}); return {ok:true,zip:true}; }
+      catch(e){ return {ok:false,motivo:(e&&e.code)||"cancelado"}; }
+    }
+  }
+  try{ const blob=new Blob([bytes],{type:"application/octet-stream"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=nome;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000); return {ok:true,zip:false}; }
+  catch(e){ return {ok:false,motivo:"indisponivel"}; }
+}
 const VIN_RE=/^[A-HJ-NPR-Z0-9]{17}$/;
 function lerAscii(b,o,t){let s="";for(let i=0;i<t&&o+i<b.length;i++){const c=b[o+i];s+=(c>=0x20&&c<=0x7e)?String.fromCharCode(c):"";}return s.trim();}
 function lerIntLE(b,o,t){let v=0;for(let i=t-1;i>=0;i--)v=v*256+b[o+i];return v;}
@@ -524,10 +550,13 @@ document.getElementById("btnRestaurar").addEventListener("click",async()=>{
     // numa cópia; o original nunca é tocado. Baixa o arquivo corrigido.
     const r=psaCorrigirKm(restState.buf,nova);
     const nomeSaida=restState.nome.replace(/\.bin$/i,"")+"_km"+nova+"_corrigido.bin";
-    baixar(nomeSaida,r.buffer);
+    const dl=await baixar(nomeSaida,r.buffer);
     await regAdicionar("Restaurar KM (painel)",restState.res.perfil.modulo+" · "+fmtKm(r.de)+" → "+fmtKm(nova)+" · "+motivo,
       {arquivo:restState.nome,arquivoSaida:nomeSaida,kmAntes:r.de,kmNova:nova,fonte,motivo,registrosAlterados:r.alterados,metodo:"CRC-32 refletido + XOR (verificado)"});
-    alert("Quilometragem corrigida e arquivo baixado: "+nomeSaida+"\n\nForam reescritos "+r.alterados+" registros do odômetro principal (o contador secundário ficou intacto). O arquivo original não foi alterado. Grave o arquivo corrigido no módulo pela sua ferramenta de bancada.");
+    const base="Quilometragem corrigida ("+fmtKm(r.de)+" → "+fmtKm(nova)+"). Foram reescritos "+r.alterados+" registros do odômetro principal (o contador secundário ficou intacto). O arquivo original NÃO foi alterado.";
+    if(dl.ok&&dl.zip) alert(base+"\n\nBaixado como "+nomeSaida.replace(/\.bin$/i,"")+".zip — o arquivo .bin corrigido está dentro do zip (o navegador de teste só entrega em zip). Descompacte e grave o .bin no módulo pela sua ferramenta de bancada.");
+    else if(dl.ok) alert(base+"\n\nArquivo baixado: "+nomeSaida+". Grave-o no módulo pela sua ferramenta de bancada.");
+    else alert(base+"\n\nO download não foi concluído ("+dl.motivo+"). No programa instalável (.exe) o arquivo é salvo direto, sem zip.");
   } else {
     // airbag: a KM ainda depende de confirmar a codificação (falta airbag com KM anotada)
     await regAdicionar("Restaurar KM airbag (pendente)",restState.res.perfil.modulo+" · "+fmtKm(restState.km)+" → "+fmtKm(nova)+" · "+motivo,{arquivo:restState.nome,kmAntes:restState.km,kmNova:nova,fonte,motivo});
@@ -567,10 +596,13 @@ document.getElementById("btnAirbag").addEventListener("click",async()=>{
   // aqui com a declaração de reparo físico marcada. O original nunca é tocado.
   const limpo=airLimparCrash(airState.buf);
   const nomeSaida=airState.nome.replace(/\.bin$/i,"")+"_crash_limpo.bin";
-  baixar(nomeSaida,limpo);
+  const dl=await baixar(nomeSaida,limpo);
   await regAdicionar("Finalizar reparo airbag (limpar crash data)",airState.res.perfil.modulo+" · "+airState.res.vin+" · reparo declarado",
     {arquivo:airState.nome,arquivoSaida:nomeSaida,vin:airState.res.vin,reparoFisico:true,reparoDescricao:reparo,colisaoAntes:airState.colisao,regioes:AIR_CRASH_REG.length});
-  alert("Crash data limpo e arquivo baixado: "+nomeSaida+"\n\nForam zerados os 12 registros de colisão (padrão de fábrica). O arquivo original não foi alterado. Grave o arquivo limpo no módulo pela sua ferramenta de bancada — lembrando que isso só é seguro porque o reparo físico foi declarado.");
+  const base="Crash data limpo — foram zerados os 12 registros de colisão (padrão de fábrica). O arquivo original NÃO foi alterado.";
+  if(dl.ok&&dl.zip) alert(base+"\n\nBaixado como "+nomeSaida.replace(/\.bin$/i,"")+".zip — o .bin limpo está dentro do zip. Descompacte e grave no módulo pela sua ferramenta de bancada. Só é seguro porque o reparo físico foi declarado.");
+  else if(dl.ok) alert(base+"\n\nArquivo baixado: "+nomeSaida+". Grave-o no módulo — só é seguro porque o reparo físico foi declarado.");
+  else alert(base+"\n\nO download não foi concluído ("+dl.motivo+"). No programa instalável (.exe) o arquivo é salvo direto.");
 });
 
 /* ========== LAUDO ========== */
