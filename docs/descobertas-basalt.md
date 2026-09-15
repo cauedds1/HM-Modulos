@@ -243,3 +243,31 @@ partir do diff original × "RESET"). Na verdade o arquivo **RESET zerou a KM**
 > Nota de método: nenhum dump entrou no repositório. Os vetores de teste usam a
 > KM 60.200 (valor já citado pelo próprio cliente) e valores derivados da
 > fórmula — nada que identifique um veículo.
+
+## Atualização 15 set (parte 2) — VIN (chassi): checksum do painel decifrado
+
+O mecânico definiu a prioridade: **chassi e KM**. A KM (os dois módulos) está
+pronta e provada. Sobre o **VIN**:
+
+- **Leitura do VIN:** confirmada. Painel em `0x0B00`; airbag em `0x4C36` (C3) —
+  **atenção: no Basalt o VIN do airbag está em `0x4C5E`**, ou seja, o offset do
+  VIN do airbag **varia por modelo** (o perfil precisa cobrir isso).
+- **Checksum do VIN do painel — DECIFRADO** (verificado em 3 carros:
+  `935CDNFXDRB522343`, `935CPFCA5SB556938`, `935CEFC2CRB551519`):
+  - `[0x0B00..+16]` = VIN (17 ASCII); `[+17]` = `0x01` constante;
+  - `[+18..+19]` = **soma dos 18 bytes (VIN + o 0x01), 16 bits, little-endian**
+    (na prática, `soma(VIN) + 1`). Bateu 3/3.
+  - Implementado em `psa.checksumVinPainel` / `escreverVinPainel` (com teste).
+- **Evidência a favor de gravar VIN no painel:** quando a ferramenta de
+  referência mudou a KM, o diff mostrou que **só** os registros do anel mudaram
+  — **não há um checksum global** do EEPROM do painel a recalcular. Logo, trocar
+  o VIN + o checksum local **deve** bastar.
+- **Ainda NÃO provado ponta a ponta:** falta um **antes/depois de uma troca de
+  VIN** (como tivemos para a KM) para provar byte a byte que o módulo aceita.
+- **Checksum do VIN do airbag:** ainda **não decifrado** — só há 2 amostras, o
+  offset varia por modelo, e os bytes após o VIN parecem um hash (não uma soma
+  simples). Precisa de mais amostras / de um antes-depois.
+
+**Material que fecha o VIN (pedido ao mecânico):** o **antes e o depois de uma
+troca de VIN** feita por ferramenta que funcione — de preferência **um painel e
+um airbag** (pode ser em peça de sucata). Igual ao que a KM precisou.

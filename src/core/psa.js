@@ -233,6 +233,63 @@ function corrigirKmAirbag(bufOriginal, novaKm) {
   return { buffer: buf, alterados: regs.length, de: odometro, para: novaKm };
 }
 
+/* ===================================================================
+ * VIN (chassi) do PAINEL — checksum decifrado (verificado em 3 carros).
+ *
+ * O VIN fica em 0x0B00 (17 ASCII). Logo depois:
+ *   [+17] = 0x01 (constante)
+ *   [+18..+19] = checksum de 16 bits, little-endian, = soma dos 18 bytes
+ *                [VIN(17) + o 0x01] (ou seja, soma do VIN + 1).
+ * Confirmado em 935CDNFXDRB522343, 935CPFCA5SB556938 e 935CEFC2CRB551519.
+ *
+ * NOTA DE HONESTIDADE: a FoRMULA do checksum está confirmada, mas a gravação
+ * de VIN ainda NAO foi provada de ponta a ponta (falta um antes/depois de uma
+ * troca de VIN, como tivemos para a KM). Enquanto isso, escreverVinPainel
+ * recalcula o checksum conhecido — mas o produto só deve LIBERAR a gravação de
+ * VIN após essa confirmação. Airbag: o checksum do VIN do airbag ainda não foi
+ * decifrado (offset varia por modelo e parece um hash; faltam amostras).
+ * =================================================================== */
+
+const VIN_PAINEL_OFFSET = 0x0B00;
+
+/** Checksum do VIN do painel (16 bits) = soma de VIN(17) + byte [+17]. */
+function checksumVinPainel(buf, o = VIN_PAINEL_OFFSET) {
+  let s = 0;
+  for (let i = 0; i < 18; i++) s += buf[o + i]; // 17 do VIN + o 0x01
+  return s & 0xffff;
+}
+
+/** Confere se o checksum gravado do VIN do painel bate com a fórmula. */
+function vinPainelValido(buf, o = VIN_PAINEL_OFFSET) {
+  const gravado = buf[o + 18] | (buf[o + 19] << 8);
+  return gravado === checksumVinPainel(buf, o);
+}
+
+/**
+ * Escreve um novo VIN no painel numa CoPIA e recalcula o checksum conhecido.
+ * Devolve { buffer, de, para }. Nunca toca no original. Recusa VIN != 17 chars.
+ * (Gravação de VIN ainda pendente de confirmação byte a byte — ver nota acima.)
+ */
+function escreverVinPainel(bufOriginal, novoVin) {
+  if (typeof novoVin !== 'string' || novoVin.length !== 17) {
+    throw new Error('VIN inválido (precisa de 17 caracteres)');
+  }
+  const buf = Buffer.from(bufOriginal);
+  const o = VIN_PAINEL_OFFSET;
+  const de = lerVinPainelBruto(buf, o);
+  for (let i = 0; i < 17; i++) buf[o + i] = novoVin.charCodeAt(i);
+  const ck = checksumVinPainel(buf, o); // recalcula sobre o VIN novo
+  buf[o + 18] = ck & 0xff;
+  buf[o + 19] = (ck >> 8) & 0xff;
+  return { buffer: buf, de, para: novoVin };
+}
+
+function lerVinPainelBruto(buf, o = VIN_PAINEL_OFFSET) {
+  let s = '';
+  for (let i = 0; i < 17; i++) { const c = buf[o + i]; s += (c >= 0x20 && c <= 0x7e) ? String.fromCharCode(c) : ''; }
+  return s;
+}
+
 module.exports = {
   crc32r, CONST_XOR, digitoKm, hashRegistroKm,
   montarRegistroKm, pareceRegistroKm, registroKmValido,
@@ -240,4 +297,6 @@ module.exports = {
   // airbag
   AIR_XOR, hashRegistroKmAirbag, registroKmAirbagValido, scanRegistrosAirbag,
   escreverRegistroKmAirbag, lerKmAirbag, corrigirKmAirbag,
+  // vin painel
+  VIN_PAINEL_OFFSET, checksumVinPainel, vinPainelValido, escreverVinPainel,
 };

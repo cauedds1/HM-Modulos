@@ -133,3 +133,39 @@ test('registro de KM do airbag adulterado (hash nao recalculado) e invalido', ()
   buf[offs[0] + 4] ^= 0x01; // muda a KM sem corrigir o hash
   assert.strictEqual(psa.registroKmAirbagValido(buf, offs[0]), false);
 });
+
+// ================= VIN do painel (checksum decifrado) =================
+
+// Monta um painel sintetico com um VIN e o checksum correto (soma+1).
+function painelComVin(vin) {
+  const buf = Buffer.alloc(65536, 0);
+  const o = psa.VIN_PAINEL_OFFSET; // 0x0B00
+  for (let i = 0; i < 17; i++) buf[o + i] = vin.charCodeAt(i);
+  buf[o + 17] = 0x01;
+  const ck = psa.checksumVinPainel(buf, o);
+  buf[o + 18] = ck & 0xff; buf[o + 19] = (ck >> 8) & 0xff;
+  return buf;
+}
+
+test('checksum do VIN do painel = soma dos bytes + 1 (vetor real 935CDNFXDRB522343)', () => {
+  // soma dos 17 ASCII = 1055; +1 (o byte 0x01) = 1056 = 0x0420
+  const buf = painelComVin('935CDNFXDRB522343');
+  assert.strictEqual(psa.checksumVinPainel(buf), 1056);
+  assert.strictEqual(psa.vinPainelValido(buf), true);
+});
+
+test('escreverVinPainel troca o VIN, recalcula o checksum e nao toca no original', () => {
+  const orig = painelComVin('935CDNFXDRB522343');
+  const copia = Buffer.from(orig);
+  const r = psa.escreverVinPainel(orig, '935CPFCA5SB556938');
+  assert.deepStrictEqual(orig, copia, 'original intacto');
+  const o = psa.VIN_PAINEL_OFFSET;
+  const vinLido = String.fromCharCode(...r.buffer.subarray(o, o + 17));
+  assert.strictEqual(vinLido, '935CPFCA5SB556938');
+  assert.strictEqual(psa.vinPainelValido(r.buffer), true, 'checksum recalculado deve conferir');
+});
+
+test('escreverVinPainel recusa VIN com tamanho errado', () => {
+  const buf = painelComVin('935CDNFXDRB522343');
+  assert.throws(() => psa.escreverVinPainel(buf, '123'));
+});
