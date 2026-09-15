@@ -264,7 +264,7 @@
           </select></div>
           <div id="restAlerta"></div>
           <div class="acoes"><button class="btn" id="btnRestaurar" disabled>Gravar quilometragem</button><button class="trocar" id="restTrocar" type="button">trocar arquivo</button></div>
-          <div class="veto" style="margin-top:14px"><b>Por que ainda não grava:</b> depende do mesmo código de proteção (P1b). O fluxo, as travas e o registro já funcionam; só o passo final de escrever fica pendente.</div>
+          <div class="nota" style="margin-top:14px"><b>Painel:</b> a correção já é aplicada de verdade — o código de proteção da PSA foi decifrado e verificado byte a byte. Gera um <b>arquivo corrigido</b> para você gravar na bancada; o original nunca é tocado. <b>Airbag:</b> a KM ainda depende de confirmar a codificação (falta um airbag com KM anotada).</div>
         </div>
       </div></div>
     </section>
@@ -285,7 +285,7 @@
           <div class="campo"><label>O que foi reparado (obrigatório)</label><input id="airReparo" placeholder="Ex.: trocados os 2 airbags dianteiros e os pré-tensionadores"></div>
           <div id="airAlerta"></div>
           <div class="acoes"><button class="btn" id="btnAirbag" disabled>Finalizar reparo (limpar crash data)</button><button class="trocar" id="airTrocar" type="button">trocar arquivo</button></div>
-          <div class="veto" style="margin-top:14px"><b>Por que ainda não executa:</b> depende do código de proteção do airbag (P1b) e de mapear onde fica o crash data — o que precisa de um dump de airbag <em>batido</em> para comparar. O fluxo, a declaração e o registro já funcionam; só o passo de limpar fica pendente.</div>
+          <div class="nota" style="margin-top:14px"><b>Já executa de verdade:</b> os 12 registros de crash data foram mapeados (do par original/reset de um airbag real). Gera um <b>arquivo limpo</b> para você gravar na bancada; o original nunca é tocado. Só chega aqui com a declaração de reparo físico.</div>
         </div>
       </div></div>
     </section>
@@ -320,9 +320,41 @@
 "use strict";
 /* ========== NÚCLEO (vira o motor do .exe) ========== */
 const PERFIS={
-  painel:{nome:"Painel (BCCM) — PSA",modulo:"Painel (BCCM)",tamanho:65536,memoria:"EEPROM 95512",assinatura:{janela:0x0AB0,janelaTam:32,texto:"BCCM"},vin:{offset:0x0B00,tam:17},km:{offset:0x4BA0,tam:3,fator:10},kmConfianca:"confirmado"},
-  airbag:{nome:"Airbag — PSA",modulo:"Airbag",tamanho:32768,memoria:"EEPROM 95256",vin:{offset:0x4C5E,tam:17},km:{offset:0x0146,tam:2,fator:1},kmConfianca:"preliminar"}
+  painel:{nome:"Painel (BCCM) — PSA",modulo:"Painel (BCCM)",tamanho:65536,memoria:"EEPROM 95512",assinatura:{janela:0x0AB0,janelaTam:32,texto:"BCCM"},vin:{offset:0x0B00,tam:17},km:{estrutura:"anel-psa",fator:10},kmConfianca:"confirmado"},
+  airbag:{nome:"Airbag — PSA",modulo:"Airbag",tamanho:32768,memoria:"EEPROM 95256",vin:{offset:0x4C36,tam:17},km:{offset:0x0146,tam:2,fator:1},kmConfianca:"preliminar"}
 };
+/* ===== PSA painel: codigo de protecao DECIFRADO (CRC-32 refletido + XOR).
+   Espelha src/core/psa.js (mesma formula, provada byte a byte). ===== */
+const PSA_TAB=(function(){const t=new Int32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c;}return t;})();
+function psaCrc(bytes){let c=0>>>0;for(const b of bytes)c=(PSA_TAB[(c^b)&0xff]^(c>>>8))>>>0;return c>>>0;}
+const PSA_XOR=0xE38A6876;
+function psaDigito(k0,k1,k2){return (k0+k1+k2)&0xff;}
+function psaHash(k0,k1,k2){return (psaCrc([k0,k1,k2,0,0,0,0,0,0,0])^PSA_XOR)>>>0;}
+function psaRegValido(b,o){
+  if(b[o+4]||b[o+5]||b[o+7]||b[o+8]||b[o+9]||b[o+10]||b[o+11]||b[o+15])return false;
+  const k0=b[o+12],k1=b[o+13],k2=b[o+14]; if((k0|k1|k2)===0)return false;
+  if(b[o+6]!==psaDigito(k0,k1,k2))return false;
+  return ((b[o]|(b[o+1]<<8)|(b[o+2]<<16)|(b[o+3]<<24))>>>0)===psaHash(k0,k1,k2);
+}
+function psaScan(b){const out=[];for(let o=0;o+16<=b.length;o++)if(psaRegValido(b,o)){const raw=b[o+12]|(b[o+13]<<8)|(b[o+14]<<16);out.push({offset:o,raw,km:Math.floor(raw/10)});}return out;}
+function psaSeparar(regs){if(!regs.length)return{principal:[],odometro:null};
+  const vals=[...new Set(regs.map(r=>r.km))].sort((a,b)=>a-b);let corte=vals[0],maior=-1;
+  for(let i=1;i<vals.length;i++){const s=vals[i]-vals[i-1];if(s>maior){maior=s;corte=vals[i];}}
+  const principal=regs.filter(r=>r.km>=corte);
+  const odometro=principal.length?Math.max(...principal.map(r=>r.km)):Math.max(...regs.map(r=>r.km));
+  return{principal,odometro};}
+function psaLerKm(b){const{principal,odometro}=psaSeparar(psaScan(b));return{km:odometro,registrosOdometro:principal.length};}
+function psaCorrigirKm(b,novaKm){const out=b.slice();const{principal,odometro}=psaSeparar(psaScan(out));
+  const raw=novaKm*10,k0=raw&0xff,k1=(raw>>>8)&0xff,k2=(raw>>>16)&0xff,h=psaHash(k0,k1,k2),dig=psaDigito(k0,k1,k2);
+  for(const r of principal){const o=r.offset;out[o]=h&0xff;out[o+1]=(h>>>8)&0xff;out[o+2]=(h>>>16)&0xff;out[o+3]=(h>>>24)&0xff;out[o+6]=dig;out[o+12]=k0;out[o+13]=k1;out[o+14]=k2;}
+  return{buffer:out,alterados:principal.length,de:odometro,para:novaKm};}
+/* ===== Airbag: crash data (offsets reais do par original/reset). Padrao limpo = D3 43 B5 76 + zeros ===== */
+const AIR_CRASH_REG=[[15466,14],[15586,14],[15706,14],[15874,14],[16442,14],[17138,14],[17258,14],[22642,13],[22882,14],[22978,14],[23666,14],[24330,14]];
+const AIR_CRASH_HDR=[0xd3,0x43,0xb5,0x76];
+function airColisao(b){for(const [off,tam] of AIR_CRASH_REG)for(let i=0;i<tam;i++){const esp=i<4?AIR_CRASH_HDR[i]:0;if(b[off+i]!==esp)return true;}return false;}
+function airLimparCrash(b){const out=b.slice();for(const [off,tam] of AIR_CRASH_REG)for(let i=0;i<tam;i++)out[off+i]=i<4?AIR_CRASH_HDR[i]:0;return out;}
+/* baixa um arquivo binario (o corrigido) sem tocar no original */
+function baixar(nome,bytes){const blob=new Blob([bytes],{type:"application/octet-stream"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=nome;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);}
 const VIN_RE=/^[A-HJ-NPR-Z0-9]{17}$/;
 function lerAscii(b,o,t){let s="";for(let i=0;i<t&&o+i<b.length;i++){const c=b[o+i];s+=(c>=0x20&&c<=0x7e)?String.fromCharCode(c):"";}return s.trim();}
 function lerIntLE(b,o,t){let v=0;for(let i=t-1;i>=0;i--)v=v*256+b[o+i];return v;}
@@ -339,7 +371,7 @@ function analisar(slot,b){
   res.resetado=branco;res.vin=branco?"(em branco)":(vin||"—");
   if(branco)res.checks.push({t:"aviso",x:"Módulo resetado / virgem",o:"chassi em branco"});
   else res.checks.push({t:VIN_RE.test(vin)?"ok":"aviso",x:VIN_RE.test(vin)?"Chassi (VIN) válido":"Chassi não reconhecido",o:VIN_RE.test(vin)?"":"fora do padrão"});
-  let km=null;if(estOk)km=Math.floor(lerIntLE(b,p.km.offset,p.km.tam)/p.km.fator);
+  let km=null;if(estOk){km=(p.km.estrutura==="anel-psa")?psaLerKm(b).km:Math.floor(lerIntLE(b,p.km.offset,p.km.tam)/p.km.fator);}
   const kmBranco=branco||km===65535||km===null;res.km=kmBranco?null:km;res.kmConfianca=p.kmConfianca;
   if(kmBranco)res.checks.push({t:"aviso",x:"Quilometragem em branco",o:"módulo resetado ou zerado"});
   else if(p.kmConfianca==="confirmado"){const ok=km>=0&&km<2000000;res.checks.push({t:ok?"ok":"aviso",x:ok?"Quilometragem lida":"Quilometragem implausível",o:ok?"":"possível leitura ruim"});}
@@ -462,7 +494,7 @@ let restState=null;
 const inpRest=ligarDrop(document.getElementById("dropRest"),f=>lerArquivo(f,b=>{
   const slot=detectarPerfil(b);
   if(!slot){alert("Arquivo não reconhecido (tamanho "+b.length+" bytes).");return;}
-  const res=analisar(slot,b);restState={nome:f.name,slot,res,km:res.km};
+  const res=analisar(slot,b);restState={nome:f.name,slot,res,km:res.km,buf:b};
   document.getElementById("restDrop").hidden=true;document.getElementById("restForm").hidden=false;
   document.getElementById("restMod").textContent=res.perfil.modulo;
   document.getElementById("restKmAtual").textContent=fmtKm(res.km);
@@ -487,9 +519,20 @@ document.getElementById("btnRestaurar").addEventListener("click",async()=>{
   const nova=parseInt(document.getElementById("restKmNova").value,10);
   const motivo=document.getElementById("restMotivo").value;
   const fonte=document.getElementById("restFonte").value.trim();
-  // registra a TENTATIVA (mesmo sem poder gravar ainda)
-  await regAdicionar("Restaurar KM (pendente P1b)",restState.res.perfil.modulo+" · "+fmtKm(restState.km)+" → "+fmtKm(nova)+" · "+motivo,{arquivo:restState.nome,kmAntes:restState.km,kmNova:nova,fonte,motivo});
-  alert("Registrado. A gravação em si depende do código de proteção (P1b) — ainda não é aplicada. Tudo o que você preencheu ficou no registro.");
+  if(restState.slot==="painel"){
+    // GRAVAÇÃO REAL: corrige o odômetro no anel (código de proteção decifrado),
+    // numa cópia; o original nunca é tocado. Baixa o arquivo corrigido.
+    const r=psaCorrigirKm(restState.buf,nova);
+    const nomeSaida=restState.nome.replace(/\.bin$/i,"")+"_km"+nova+"_corrigido.bin";
+    baixar(nomeSaida,r.buffer);
+    await regAdicionar("Restaurar KM (painel)",restState.res.perfil.modulo+" · "+fmtKm(r.de)+" → "+fmtKm(nova)+" · "+motivo,
+      {arquivo:restState.nome,arquivoSaida:nomeSaida,kmAntes:r.de,kmNova:nova,fonte,motivo,registrosAlterados:r.alterados,metodo:"CRC-32 refletido + XOR (verificado)"});
+    alert("Quilometragem corrigida e arquivo baixado: "+nomeSaida+"\n\nForam reescritos "+r.alterados+" registros do odômetro principal (o contador secundário ficou intacto). O arquivo original não foi alterado. Grave o arquivo corrigido no módulo pela sua ferramenta de bancada.");
+  } else {
+    // airbag: a KM ainda depende de confirmar a codificação (falta airbag com KM anotada)
+    await regAdicionar("Restaurar KM airbag (pendente)",restState.res.perfil.modulo+" · "+fmtKm(restState.km)+" → "+fmtKm(nova)+" · "+motivo,{arquivo:restState.nome,kmAntes:restState.km,kmNova:nova,fonte,motivo});
+    alert("Registrado. A gravação de KM no AIRBAG ainda depende de confirmar a codificação (falta um airbag com KM anotada do mesmo carro). No painel a correção já é aplicada.");
+  }
 });
 
 /* ========== AIRBAG — finalizar reparo (crash data) ========== */
@@ -497,7 +540,7 @@ let airState=null;
 const inpAir=ligarDrop(document.getElementById("dropAir"),f=>lerArquivo(f,b=>{
   const slot=detectarPerfil(b);
   if(slot!=="airbag"){ alert("Este arquivo não é um módulo de airbag (esperado 32 KB)."); return; }
-  const res=analisar(slot,b); airState={nome:f.name,res};
+  const res=analisar(slot,b); const colisao=airColisao(b); airState={nome:f.name,res,buf:b,colisao};
   document.getElementById("airDrop").hidden=true;document.getElementById("airForm").hidden=false;
   document.getElementById("airMod").textContent=res.perfil.modulo;
   document.getElementById("airVin").textContent=res.vin;
@@ -507,7 +550,12 @@ function validarAir(){
   const decl=document.getElementById("airDecl").checked;
   const reparo=document.getElementById("airReparo").value.trim();
   const alerta=document.getElementById("airAlerta");
-  alerta.innerHTML = os ? "" : '<div class="aviso" style="margin-top:10px">Vincule uma OS antes de finalizar.</div>';
+  let av="";
+  if(airState) av+= airState.colisao
+    ? '<div class="aviso" style="margin-top:10px"><b>Colisão registrada neste airbag.</b> A limpeza vai apagar os 12 registros de crash data e devolver o módulo ao estado "ok".</div>'
+    : '<div class="aviso" style="margin-top:10px">Este airbag <b>não tem colisão registrada</b> (já está limpo). A operação não muda nada.</div>';
+  if(!os) av+='<div class="aviso" style="margin-top:10px">Vincule uma OS antes de finalizar.</div>';
+  alerta.innerHTML=av;
   document.getElementById("btnAirbag").disabled = !(decl && reparo && os);
 }
 document.getElementById("airDecl").addEventListener("change",validarAir);
@@ -515,8 +563,14 @@ document.getElementById("airReparo").addEventListener("input",validarAir);
 document.getElementById("airTrocar").addEventListener("click",()=>inpAir.click());
 document.getElementById("btnAirbag").addEventListener("click",async()=>{
   const reparo=document.getElementById("airReparo").value.trim();
-  await regAdicionar("Finalizar reparo airbag (pendente P1b)",airState.res.perfil.modulo+" · "+airState.res.vin+" · reparo declarado",{arquivo:airState.nome,vin:airState.res.vin,reparoFisico:true,reparoDescricao:reparo});
-  alert("Registrado com a declaração de reparo físico. A limpeza do crash data em si depende do código de proteção (P1b) e do mapeamento — ainda não é aplicada. A declaração e o registro já ficaram guardados.");
+  // LIMPEZA REAL do crash data (offsets reais mapeados), numa cópia. Só chega
+  // aqui com a declaração de reparo físico marcada. O original nunca é tocado.
+  const limpo=airLimparCrash(airState.buf);
+  const nomeSaida=airState.nome.replace(/\.bin$/i,"")+"_crash_limpo.bin";
+  baixar(nomeSaida,limpo);
+  await regAdicionar("Finalizar reparo airbag (limpar crash data)",airState.res.perfil.modulo+" · "+airState.res.vin+" · reparo declarado",
+    {arquivo:airState.nome,arquivoSaida:nomeSaida,vin:airState.res.vin,reparoFisico:true,reparoDescricao:reparo,colisaoAntes:airState.colisao,regioes:AIR_CRASH_REG.length});
+  alert("Crash data limpo e arquivo baixado: "+nomeSaida+"\n\nForam zerados os 12 registros de colisão (padrão de fábrica). O arquivo original não foi alterado. Grave o arquivo limpo no módulo pela sua ferramenta de bancada — lembrando que isso só é seguro porque o reparo físico foi declarado.");
 });
 
 /* ========== LAUDO ========== */
