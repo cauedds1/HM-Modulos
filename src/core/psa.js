@@ -157,8 +157,87 @@ function corrigirKmPainel(bufOriginal, novaKm) {
   return { buffer: buf, alterados: principal.length, de: odometro, para: novaKm };
 }
 
+/* ===================================================================
+ * AIRBAG PSA — anel de KM (decifrado 15 set 2026 com antes/depois do
+ * mesmo carro: 157383 -> 60200, VIN 935CDNFXDRB522343).
+ *
+ * Cada registro de KM do airbag:
+ *   [0..3] hash de 4 bytes, gravado em BIG-ENDIAN (MSB primeiro)
+ *   [4..6] KM (x1, sem fator), little-endian
+ * O hash: CRC-32 refletido (mesmo poly 0xEDB88320) sobre [km0,km1,km2,0]
+ * (3 bytes de KM + 1 byte zero), XOR 0xD343B576. Verificado em 36/36
+ * registros; reproduz o arquivo de referencia byte a byte.
+ * (A constante 0xD343B576 e o hash do registro vazio km=0 — o "D3 43 B5 76".)
+ * =================================================================== */
+
+const AIR_XOR = 0xD343B576;
+const AIR_KM_MAX = 2000000; // plausibilidade (evita falso positivo no scan)
+
+/** Hash de 4 bytes de um registro de KM do airbag (numero de 32 bits). */
+function hashRegistroKmAirbag(k0, k1, k2) {
+  return (crc32r([k0, k1, k2, 0]) ^ AIR_XOR) >>> 0;
+}
+
+/** Diz se um offset carrega um registro de KM valido do airbag. */
+function registroKmAirbagValido(buf, o) {
+  if (o + 7 > buf.length) return false;
+  const k0 = buf[o + 4], k1 = buf[o + 5], k2 = buf[o + 6];
+  const H = hashRegistroKmAirbag(k0, k1, k2);
+  return buf[o] === ((H >>> 24) & 0xff) && buf[o + 1] === ((H >>> 16) & 0xff)
+    && buf[o + 2] === ((H >>> 8) & 0xff) && buf[o + 3] === (H & 0xff);
+}
+
+/** Varre o dump do airbag e devolve os registros de KM validos e plausiveis. */
+function scanRegistrosAirbag(buf) {
+  const out = [];
+  for (let o = 0; o + 7 <= buf.length; o++) {
+    if (registroKmAirbagValido(buf, o)) {
+      const km = buf[o + 4] | (buf[o + 5] << 8) | (buf[o + 6] << 16);
+      if (km > 0 && km < AIR_KM_MAX) out.push({ offset: o, km });
+    }
+  }
+  return out;
+}
+
+/** Escreve um registro de KM do airbag no offset (hash BE + km LE). */
+function escreverRegistroKmAirbag(buf, o, km) {
+  const k0 = km & 0xff, k1 = (km >> 8) & 0xff, k2 = (km >> 16) & 0xff;
+  const H = hashRegistroKmAirbag(k0, k1, k2);
+  buf[o] = (H >>> 24) & 0xff; buf[o + 1] = (H >>> 16) & 0xff;
+  buf[o + 2] = (H >>> 8) & 0xff; buf[o + 3] = H & 0xff;
+  buf[o + 4] = k0; buf[o + 5] = k1; buf[o + 6] = k2;
+}
+
+/**
+ * Le a quilometragem do airbag: o odometro e o MAIOR valor do anel (o mais
+ * recente da historia). Diferente do painel, o airbag nao tem contador
+ * secundario — todos os registros validos sao o mesmo odometro.
+ */
+function lerKmAirbag(buf) {
+  const regs = scanRegistrosAirbag(buf);
+  if (!regs.length) return { km: null, registros: 0 };
+  const odometro = Math.max(...regs.map((r) => r.km));
+  return { km: odometro, registros: regs.length };
+}
+
+/**
+ * Corrige a KM do airbag numa CoPIA: reescreve TODOS os registros validos do
+ * anel para a nova KM (como faz a ferramenta de referencia — verificado byte a
+ * byte). Nunca toca no original.
+ */
+function corrigirKmAirbag(bufOriginal, novaKm) {
+  const buf = Buffer.from(bufOriginal);
+  const regs = scanRegistrosAirbag(buf);
+  const odometro = regs.length ? Math.max(...regs.map((r) => r.km)) : null;
+  for (const r of regs) escreverRegistroKmAirbag(buf, r.offset, novaKm);
+  return { buffer: buf, alterados: regs.length, de: odometro, para: novaKm };
+}
+
 module.exports = {
   crc32r, CONST_XOR, digitoKm, hashRegistroKm,
   montarRegistroKm, pareceRegistroKm, registroKmValido,
   scanRegistros, separarOdometro, lerKmPainel, corrigirKmPainel,
+  // airbag
+  AIR_XOR, hashRegistroKmAirbag, registroKmAirbagValido, scanRegistrosAirbag,
+  escreverRegistroKmAirbag, lerKmAirbag, corrigirKmAirbag,
 };

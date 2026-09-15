@@ -90,3 +90,46 @@ test('CRC-32 refletido bate com o padrao (poly 0xEDB88320)', () => {
   assert.strictEqual(c, 0xCBF43926);
   void inicio;
 });
+
+// ================= AIRBAG (anel de KM, decifrado do antes/depois) =================
+
+test('hash do registro de KM do airbag confere com o vetor de ouro (60200 km)', () => {
+  // 60200 = 0xEB28 -> k0=0x28 k1=0xeb k2=0x00. Hash gravado (BE) = 13 72 0d e6.
+  assert.strictEqual(psa.hashRegistroKmAirbag(0x28, 0xeb, 0x00) >>> 0, 0x13720de6);
+});
+
+test('a constante do airbag e o hash do registro vazio (km=0 -> D3 43 B5 76)', () => {
+  assert.strictEqual(psa.hashRegistroKmAirbag(0, 0, 0) >>> 0, 0xd343b576);
+});
+
+// Monta um airbag sintetico com um anel de registros de KM (hash BE + km LE).
+function airbagSintetico(km) {
+  const buf = Buffer.alloc(32768, 0);
+  // planta 12 registros do odometro, com pequena variacao (historia do anel)
+  const offs = [0x100, 0x400, 0x800, 0x1000, 0x1500, 0x1a00, 0x2000, 0x2600, 0x3000, 0x3800, 0x4000, 0x4800];
+  offs.forEach((o, i) => psa.escreverRegistroKmAirbag(buf, o, km - (11 - i))); // ..., km-1, km
+  return { buf, offs };
+}
+
+test('lerKmAirbag devolve o odometro (o maior do anel)', () => {
+  const { buf } = airbagSintetico(157383);
+  assert.strictEqual(psa.lerKmAirbag(buf).km, 157383);
+  assert.strictEqual(psa.lerKmAirbag(buf).registros, 12);
+});
+
+test('corrigirKmAirbag reescreve todo o anel e nao toca no original', () => {
+  const { buf } = airbagSintetico(157383);
+  const copia = Buffer.from(buf);
+  const r = psa.corrigirKmAirbag(buf, 60200);
+  assert.strictEqual(r.de, 157383);
+  assert.strictEqual(r.para, 60200);
+  assert.strictEqual(r.alterados, 12);
+  assert.deepStrictEqual(buf, copia, 'o original nao pode ser tocado');
+  assert.strictEqual(psa.lerKmAirbag(r.buffer).km, 60200);
+});
+
+test('registro de KM do airbag adulterado (hash nao recalculado) e invalido', () => {
+  const { buf, offs } = airbagSintetico(60200);
+  buf[offs[0] + 4] ^= 0x01; // muda a KM sem corrigir o hash
+  assert.strictEqual(psa.registroKmAirbagValido(buf, offs[0]), false);
+});

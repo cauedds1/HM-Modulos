@@ -37,10 +37,13 @@ function lerVin(buf, campo) {
  * é o valor bruto dividido pelo fator (ex.: painel PSA guarda 251000 → 25100).
  */
 function lerKm(buf, campo) {
-  // Painel PSA: a KM vive num anel de registros com codigo de protecao proprio
+  // PSA: a KM vive num anel de registros com codigo de protecao proprio
   // (decifrado — ver src/core/psa.js). Le o odometro principal do anel.
   if (campo.estrutura === 'anel-de-registros-psa') {
     return psa.lerKmPainel(buf).km; // pode ser null se nao houver registros validos
+  }
+  if (campo.estrutura === 'anel-airbag-psa') {
+    return psa.lerKmAirbag(buf).km;
   }
   const bruto = codec.lerReplica(
     buf,

@@ -42,11 +42,14 @@ do painel PSA foi decifrado com o material do mecânico (antes/depois de um pain
 C3 com KM conhecida). É **CRC-32 refletido** (poly `0xEDB88320`) sobre a janela
 `3 bytes de KM + 7 zeros`, XOR `0xE38A6876`. A KM vive num **anel de registros**
 de 16 bytes (o antigo offset `0x4BA0` estava errado). Leitura e escrita do painel
-prontas e **provadas byte a byte** em `src/core/psa.js` (`lerKmPainel`,
-`corrigirKmPainel`) — reproduzem o arquivo da ferramenta de referência. Detalhe
-em `descobertas-basalt.md` (seção "15 set"). **Falta ainda:** a codificação da KM
-do **airbag** (precisa de airbag com KM anotada do mesmo carro); a crash data do
-airbag já está mapeada (12 regiões, offsets reais no perfil `psa-airbag`).
+prontas e **provadas byte a byte** em `src/core/psa.js`. A **KM do airbag também
+foi decifrada** (mesmo carro antes/depois, 157383→60200): anel de registros
+`[hash 4b BE][km 3b LE]`, hash = CRC-32 refletido `XOR 0xD343B576`; `lerKmAirbag`/
+`corrigirKmAirbag` reproduzem a referência byte a byte. Logo **sincronismo de KM
+painel↔airbag já funciona** (motor + interface). Detalhe em `descobertas-basalt.md`
+(seção "15 set"). **Correção:** o que se pensava ser *crash data* do airbag eram
+os registros de KM — a **crash data segue NÃO mapeada** (precisa de um airbag
+efetivamente batido). **Falta ainda:** crash data do airbag; Aircross; chave/OBD.
 
 ## Convenções e regras (importantes)
 

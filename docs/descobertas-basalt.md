@@ -195,26 +195,50 @@ achada a janela (7 bytes de enchimento) e a constante `0xE38A6876` por varredura
   referência **byte a byte (0 diferenças)** — motor de leitura E escrita do
   painel provado ponta a ponta.
 
-### Airbag — offsets reais (do par original/reset)
+### Airbag — VIN
 - **VIN do airbag: offset `0x4C36`** (17 ASCII). *(Antes supunha-se `0x4C5E` —
   corrigido.)*
-- **Crash data:** 12 registros de 14 bytes nas posições
+
+### ★ Airbag — KM DECIFRADA (adendo, mesmo carro antes/depois)
+O mecânico confirmou que o painel e os airbags são do **mesmo carro** (VIN
+`935CDNFXDRB522343`) e que o airbag `..._KM_60200_..._ENIGMA` é o **depois** do
+airbag original — ou seja, temos antes (157.383) e depois (60.200) do airbag,
+igual ao painel. A foto do painel real mostra **157.383 km**, batendo com a
+leitura. Isso permitiu decifrar a KM do airbag.
+
+- **A KM do airbag NÃO fica num campo único.** Fica num **anel de registros**
+  espalhados pelo dump (não alinhados), nas posições
   `0x3C6A, 0x3CE2, 0x3D5A, 0x3E02, 0x403A, 0x42F2, 0x436A, 0x5872, 0x5962,
   0x59C2, 0x5C72, 0x5F0A`.
-  - Cada registro de colisão tem marcadores constantes (`66 02 00` e `15 15`) e
-    um índice de evento crescente no byte `[4]`.
-  - Ao **resetar**, cada registro vira o padrão fixo **`D3 43 B5 76` seguido de
-    zeros** (não é preenchimento com um único byte — é um cabeçalho fixo, provável
-    CRC do registro vazio). É esse padrão que a limpeza deve gravar.
-- **KM do airbag:** ainda a confirmar a codificação (o airbag anotado é de outro
-  carro — "Paulo", VIN `935CDNFXDRB522343`, KM 60.200). Segue "preliminar".
+- Cada registro: **`[hash 4 bytes, big-endian][KM 3 bytes LE, ×1]`**.
+  - Odômetro = **maior KM** do anel (o mais recente). No original, os registros
+    vão de 157.263 a 157.383 (histórico); o topo (157.383) é o odômetro.
+- **Fórmula do hash (verificada em 36/36 registros):**
+  `hash = CRC32_refletido( [km0, km1, km2, 0] ) XOR 0xD343B576`, gravado em
+  **big-endian**. É o **mesmo CRC-32** do painel (poly `0xEDB88320`), com janela
+  e constante próprias. A constante `0xD343B576` é o hash do registro vazio
+  (km=0) — o famoso `D3 43 B5 76`.
+- **Prova:** `corrigirKmAirbag(original, 60200)` reproduz o arquivo de
+  referência (o airbag "Paulo") **byte a byte (0 diferenças)**.
+- Implementado em `src/core/psa.js` (`lerKmAirbag`, `corrigirKmAirbag`).
+
+### ⚠️ Correção importante — o que se pensou ser "crash data" é a KM
+Esses 12 registros tinham sido **erroneamente** rotulados como *crash data* (a
+partir do diff original × "RESET"). Na verdade o arquivo **RESET zerou a KM**
+(km=0 → hash `D3 43 B5 76`), não a colisão. Logo:
+- **A crash data do airbag ainda NÃO está mapeada.** Mapear exige um dump de
+  airbag **efetivamente batido** (com colisão registrada) para comparar.
+- O perfil e a interface foram corrigidos para não mexer nesses registros como
+  se fossem colisão (evita zerar a KM por engano).
 
 ### O que isto destrava
-- **E1 (quebrar proteção): CONCLUÍDO** para o painel PSA (C3/Aircross/Basalt).
-- **E2 (escrita) do painel: pronto e provado** — `psa.lerKmPainel` e
-  `psa.corrigirKmPainel`.
-- **Airbag (E5):** offsets reais de VIN e crash data mapeados; falta ligar o
-  perfil e confirmar a KM do airbag.
+- **E1 (quebrar proteção): CONCLUÍDO** para painel **e airbag** PSA.
+- **E2 (escrita): pronto e provado** para os dois — `psa.lerKmPainel/
+  corrigirKmPainel` e `psa.lerKmAirbag/corrigirKmAirbag` (0 diferenças vs
+  referência).
+- **Sincronismo de KM painel↔airbag: agora possível de ponta a ponta.**
+- **Falta:** crash data do airbag (precisa de airbag batido); confirmar
+  Aircross; a parte de chave/OBD (fases futuras).
 
 > Nota de método: nenhum dump entrou no repositório. Os vetores de teste usam a
 > KM 60.200 (valor já citado pelo próprio cliente) e valores derivados da

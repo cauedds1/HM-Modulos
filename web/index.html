@@ -238,7 +238,7 @@
         <p class="nota" id="casNota" style="margin-top:12px"></p>
         <div id="direcaoBox"></div>
         <div class="acoes"><button class="btn" id="btnGerar" disabled>Gerar arquivo corrigido</button></div>
-        <div class="veto" id="avisoGravar" style="margin-top:14px"><b>Por que ainda não gera:</b> aplicar a correção exige reproduzir o código de proteção interno do painel (próprio da PSA, ainda sendo decifrado — item P1b do escopo). Assim que quebrado, este botão salva o arquivo corrigido. Até lá, a tela mostra o que <em>seria</em> alterado.</div>
+        <div class="aviso" id="avisoGravar" style="margin-top:14px"><b>Casar:</b> carregue os dois módulos do mesmo carro. Quando a KM divergir, o botão Gerar fica ativo para sincronizar.</div>
       </div></div>
     </section>
 
@@ -285,7 +285,7 @@
           <div class="campo"><label>O que foi reparado (obrigatório)</label><input id="airReparo" placeholder="Ex.: trocados os 2 airbags dianteiros e os pré-tensionadores"></div>
           <div id="airAlerta"></div>
           <div class="acoes"><button class="btn" id="btnAirbag" disabled>Finalizar reparo (limpar crash data)</button><button class="trocar" id="airTrocar" type="button">trocar arquivo</button></div>
-          <div class="nota" style="margin-top:14px"><b>Já executa de verdade:</b> os 12 registros de crash data foram mapeados (do par original/reset de um airbag real). Gera um <b>arquivo limpo</b> para você gravar na bancada; o original nunca é tocado. Só chega aqui com a declaração de reparo físico.</div>
+          <div class="veto" style="margin-top:14px"><b>Ainda não executa a limpeza:</b> a localização da crash data no airbag ainda não foi mapeada (precisa de um dump de airbag <em>batido</em> para comparar). O fluxo, a declaração e o registro já funcionam; a KM do airbag, essa sim, já é lida e corrigida (nas abas Diagnóstico, Sincronismo e Restaurar KM).</div>
         </div>
       </div></div>
     </section>
@@ -321,7 +321,7 @@
 /* ========== NÚCLEO (vira o motor do .exe) ========== */
 const PERFIS={
   painel:{nome:"Painel (BCCM) — PSA",modulo:"Painel (BCCM)",tamanho:65536,memoria:"EEPROM 95512",assinatura:{janela:0x0AB0,janelaTam:32,texto:"BCCM"},vin:{offset:0x0B00,tam:17},km:{estrutura:"anel-psa",fator:10},kmConfianca:"confirmado"},
-  airbag:{nome:"Airbag — PSA",modulo:"Airbag",tamanho:32768,memoria:"EEPROM 95256",vin:{offset:0x4C36,tam:17},km:{offset:0x0146,tam:2,fator:1},kmConfianca:"preliminar"}
+  airbag:{nome:"Airbag — PSA",modulo:"Airbag",tamanho:32768,memoria:"EEPROM 95256",vin:{offset:0x4C36,tam:17},km:{estrutura:"anel-airbag",fator:1},kmConfianca:"confirmado"}
 };
 /* ===== PSA painel: codigo de protecao DECIFRADO (CRC-32 refletido + XOR).
    Espelha src/core/psa.js (mesma formula, provada byte a byte). ===== */
@@ -348,11 +348,14 @@ function psaCorrigirKm(b,novaKm){const out=b.slice();const{principal,odometro}=p
   const raw=novaKm*10,k0=raw&0xff,k1=(raw>>>8)&0xff,k2=(raw>>>16)&0xff,h=psaHash(k0,k1,k2),dig=psaDigito(k0,k1,k2);
   for(const r of principal){const o=r.offset;out[o]=h&0xff;out[o+1]=(h>>>8)&0xff;out[o+2]=(h>>>16)&0xff;out[o+3]=(h>>>24)&0xff;out[o+6]=dig;out[o+12]=k0;out[o+13]=k1;out[o+14]=k2;}
   return{buffer:out,alterados:principal.length,de:odometro,para:novaKm};}
-/* ===== Airbag: crash data (offsets reais do par original/reset). Padrao limpo = D3 43 B5 76 + zeros ===== */
-const AIR_CRASH_REG=[[15466,14],[15586,14],[15706,14],[15874,14],[16442,14],[17138,14],[17258,14],[22642,13],[22882,14],[22978,14],[23666,14],[24330,14]];
-const AIR_CRASH_HDR=[0xd3,0x43,0xb5,0x76];
-function airColisao(b){for(const [off,tam] of AIR_CRASH_REG)for(let i=0;i<tam;i++){const esp=i<4?AIR_CRASH_HDR[i]:0;if(b[off+i]!==esp)return true;}return false;}
-function airLimparCrash(b){const out=b.slice();for(const [off,tam] of AIR_CRASH_REG)for(let i=0;i<tam;i++)out[off+i]=i<4?AIR_CRASH_HDR[i]:0;return out;}
+/* ===== Airbag PSA: anel de KM DECIFRADO (mesmo carro antes/depois, 157383->60200).
+   Registro: [hash 4b BE][km 3b LE x1]. hash = crc32r([km0,km1,km2,0]) ^ 0xD343B576. ===== */
+const AIR_XOR=0xD343B576;
+function airHash(k0,k1,k2){return (psaCrc([k0,k1,k2,0])^AIR_XOR)>>>0;}
+function airRegValido(b,o){if(o+7>b.length)return false;const k0=b[o+4],k1=b[o+5],k2=b[o+6];const H=airHash(k0,k1,k2);return b[o]===((H>>>24)&0xff)&&b[o+1]===((H>>>16)&0xff)&&b[o+2]===((H>>>8)&0xff)&&b[o+3]===(H&0xff);}
+function airScan(b){const out=[];for(let o=0;o+7<=b.length;o++)if(airRegValido(b,o)){const km=b[o+4]|(b[o+5]<<8)|(b[o+6]<<16);if(km>0&&km<2000000)out.push({offset:o,km});}return out;}
+function airLerKm(b){const regs=airScan(b);return regs.length?Math.max(...regs.map(r=>r.km)):null;}
+function airCorrigirKm(b,novaKm){const out=b.slice();const regs=airScan(out);const de=regs.length?Math.max(...regs.map(r=>r.km)):null;const k0=novaKm&0xff,k1=(novaKm>>>8)&0xff,k2=(novaKm>>>16)&0xff,H=airHash(k0,k1,k2);for(const r of regs){const o=r.offset;out[o]=(H>>>24)&0xff;out[o+1]=(H>>>16)&0xff;out[o+2]=(H>>>8)&0xff;out[o+3]=H&0xff;out[o+4]=k0;out[o+5]=k1;out[o+6]=k2;}return{buffer:out,alterados:regs.length,de:de,para:novaKm};}
 /* ZIP (armazenado, sem compressao) para entregar o .bin no app publicado,
    onde o download direto e bloqueado e a lista de extensoes nao aceita .bin. */
 function zipCrc(bytes){let c=0xFFFFFFFF>>>0;for(const b of bytes)c=(PSA_TAB[(c^b)&0xff]^(c>>>8))>>>0;return (c^0xFFFFFFFF)>>>0;}
@@ -397,7 +400,7 @@ function analisar(slot,b){
   res.resetado=branco;res.vin=branco?"(em branco)":(vin||"—");
   if(branco)res.checks.push({t:"aviso",x:"Módulo resetado / virgem",o:"chassi em branco"});
   else res.checks.push({t:VIN_RE.test(vin)?"ok":"aviso",x:VIN_RE.test(vin)?"Chassi (VIN) válido":"Chassi não reconhecido",o:VIN_RE.test(vin)?"":"fora do padrão"});
-  let km=null;if(estOk){km=(p.km.estrutura==="anel-psa")?psaLerKm(b).km:Math.floor(lerIntLE(b,p.km.offset,p.km.tam)/p.km.fator);}
+  let km=null;if(estOk){km=(p.km.estrutura==="anel-psa")?psaLerKm(b).km:(p.km.estrutura==="anel-airbag")?airLerKm(b):Math.floor(lerIntLE(b,p.km.offset,p.km.tam)/p.km.fator);}
   const kmBranco=branco||km===65535||km===null;res.km=kmBranco?null:km;res.kmConfianca=p.kmConfianca;
   if(kmBranco)res.checks.push({t:"aviso",x:"Quilometragem em branco",o:"módulo resetado ou zerado"});
   else if(p.kmConfianca==="confirmado"){const ok=km>=0&&km<2000000;res.checks.push({t:ok?"ok":"aviso",x:ok?"Quilometragem lida":"Quilometragem implausível",o:ok?"":"possível leitura ruim"});}
@@ -485,7 +488,7 @@ document.querySelectorAll(".card[data-slot]").forEach(slotEl=>{
     const ficha=slotEl.querySelector(".slotficha");
     slotEl.querySelector(".slotdrop").hidden=true;slotEl.querySelector(".trocar").hidden=false;
     if(b.length!==PERFIS[slot].tamanho){ficha.innerHTML='<div class="veto" style="margin-top:12px">Tamanho inesperado ('+b.length+' bytes).</div>';dados[slot]=null;atualizarCasamento();return;}
-    const res=analisar(slot,b),hash=await sha256Hex(b);dados[slot]={nome:f.name,res,hash};
+    const res=analisar(slot,b),hash=await sha256Hex(b);dados[slot]={nome:f.name,res,hash,buf:b};
     let km=res.km==null?"—":res.km.toLocaleString("pt-BR")+" km"+(res.kmConfianca==="preliminar"?' <small>preliminar</small>':'');
     ficha.innerHTML='<div style="margin-top:12px"><div class="linha"><span class="rot">Chassi</span><span class="val">'+esc(res.vin)+'</span></div><div class="linha"><span class="rot">KM</span><span class="val">'+km+'</span></div></div>';
     atualizarCasamento();
@@ -510,10 +513,39 @@ function atualizarCasamento(){
     let h="";if(!vinIg)h+='<div style="margin-top:12px"><div class="rot">Chassi — usar o valor de:</div><div class="escolha"><label><input type="radio" name="dvin" checked> Painel ('+esc(p.vin)+')</label><label><input type="radio" name="dvin"> Airbag ('+esc(a.vin)+')</label></div></div>';
     if(!kmIg)h+='<div style="margin-top:12px"><div class="rot">Quilometragem — usar o valor de:</div><div class="escolha"><label><input type="radio" name="dkm" checked> Painel ('+fmtKm(p.km)+')</label><label><input type="radio" name="dkm"> Airbag ('+fmtKm(a.km)+')</label></div></div>';
     dir.innerHTML=h;estado="fora-de-sincronia";}
+  // o botão Gerar casa a KM (painel e airbag decifrados). VIN diferente é troca
+  // de módulo — operação à parte, não é aplicada aqui.
+  const podeKm = estado==="fora-de-sincronia" && !kmIg && p.km!=null && a.km!=null;
+  document.getElementById("btnGerar").disabled = !podeKm;
+  const aviso=document.getElementById("avisoGravar");
+  if(podeKm) aviso.innerHTML='<b>Casar a quilometragem:</b> escolha a fonte da KM acima e clique em Gerar. O sistema reescreve a KM no módulo que diverge (código de proteção já decifrado) e baixa o arquivo corrigido. O original nunca é tocado.'+(!vinIg?' <br><b>Chassi diferente</b> é troca de módulo — operação à parte, não aplicada aqui.':'');
+  else aviso.innerHTML='<b>Casar:</b> carregue os dois módulos do mesmo carro. Quando a KM divergir, o botão Gerar fica ativo para sincronizar.';
   // registra a análise de casamento uma vez por combinação
   const chave=dados.painel.hash+"/"+dados.airbag.hash+"/"+estado;
   if(chave!==sincRegistrado){ sincRegistrado=chave; regAdicionar("Sincronismo (análise)","Painel "+p.vin+" "+fmtKm(p.km)+" × Airbag "+a.vin+" "+fmtKm(a.km)+" → "+estado,{estado,painel:dados.painel.nome,airbag:dados.airbag.nome}); }
 }
+document.getElementById("btnGerar").addEventListener("click",async()=>{
+  if(!dados.painel||!dados.airbag) return;
+  const p=dados.painel,a=dados.airbag;
+  const fontePainel=(document.querySelector('input[name="dkm"]')||{}).checked; // 1º radio = Painel
+  const alvo=fontePainel?p.res.km:a.res.km;
+  if(alvo==null){ alert("Não consegui ler a KM de origem."); return; }
+  // corrige o módulo que diverge do alvo; baixa o(s) arquivo(s) corrigido(s)
+  const saidas=[];
+  for(const slot of ["painel","airbag"]){
+    const d=dados[slot]; if(d.res.km===alvo) continue; // já bate, não mexe
+    const r=(slot==="painel")?psaCorrigirKm(d.buf,alvo):airCorrigirKm(d.buf,alvo);
+    const nome=d.nome.replace(/\.bin$/i,"")+"_sync"+alvo+".bin";
+    const dl=await baixar(nome,r.buffer);
+    saidas.push({slot,nome,de:r.de,alterados:r.alterados,dl});
+  }
+  await regAdicionar("Sincronismo (KM aplicada)","KM casada em "+fmtKm(alvo)+" (fonte: "+(fontePainel?"painel":"airbag")+")",
+    {alvoKm:alvo,fonte:fontePainel?"painel":"airbag",saidas:saidas.map(s=>({modulo:s.slot,arquivo:s.nome,de:s.de,registros:s.alterados}))});
+  if(!saidas.length){ alert("A KM já está casada — nada a corrigir."); return; }
+  const zipou=saidas.some(s=>s.dl.ok&&s.dl.zip);
+  const linhas=saidas.map(s=>"• "+s.slot+": "+fmtKm(s.de)+" → "+fmtKm(alvo)+" ("+s.nome+")").join("\n");
+  alert("Quilometragem casada em "+fmtKm(alvo)+".\n\n"+linhas+"\n\nOs originais NÃO foram alterados."+(zipou?" No navegador de teste o download vem em .zip (o .bin está dentro).":"")+" Grave os arquivos corrigidos nos módulos pela sua ferramenta de bancada.");
+});
 
 /* ========== RESTAURAR KM ========== */
 let restState=null;
@@ -545,31 +577,30 @@ document.getElementById("btnRestaurar").addEventListener("click",async()=>{
   const nova=parseInt(document.getElementById("restKmNova").value,10);
   const motivo=document.getElementById("restMotivo").value;
   const fonte=document.getElementById("restFonte").value.trim();
-  if(restState.slot==="painel"){
-    // GRAVAÇÃO REAL: corrige o odômetro no anel (código de proteção decifrado),
-    // numa cópia; o original nunca é tocado. Baixa o arquivo corrigido.
-    const r=psaCorrigirKm(restState.buf,nova);
-    const nomeSaida=restState.nome.replace(/\.bin$/i,"")+"_km"+nova+"_corrigido.bin";
-    const dl=await baixar(nomeSaida,r.buffer);
-    await regAdicionar("Restaurar KM (painel)",restState.res.perfil.modulo+" · "+fmtKm(r.de)+" → "+fmtKm(nova)+" · "+motivo,
-      {arquivo:restState.nome,arquivoSaida:nomeSaida,kmAntes:r.de,kmNova:nova,fonte,motivo,registrosAlterados:r.alterados,metodo:"CRC-32 refletido + XOR (verificado)"});
-    const base="Quilometragem corrigida ("+fmtKm(r.de)+" → "+fmtKm(nova)+"). Foram reescritos "+r.alterados+" registros do odômetro principal (o contador secundário ficou intacto). O arquivo original NÃO foi alterado.";
-    if(dl.ok&&dl.zip) alert(base+"\n\nBaixado como "+nomeSaida.replace(/\.bin$/i,"")+".zip — o arquivo .bin corrigido está dentro do zip (o navegador de teste só entrega em zip). Descompacte e grave o .bin no módulo pela sua ferramenta de bancada.");
-    else if(dl.ok) alert(base+"\n\nArquivo baixado: "+nomeSaida+". Grave-o no módulo pela sua ferramenta de bancada.");
-    else alert(base+"\n\nO download não foi concluído ("+dl.motivo+"). No programa instalável (.exe) o arquivo é salvo direto, sem zip.");
-  } else {
-    // airbag: a KM ainda depende de confirmar a codificação (falta airbag com KM anotada)
-    await regAdicionar("Restaurar KM airbag (pendente)",restState.res.perfil.modulo+" · "+fmtKm(restState.km)+" → "+fmtKm(nova)+" · "+motivo,{arquivo:restState.nome,kmAntes:restState.km,kmNova:nova,fonte,motivo});
-    alert("Registrado. A gravação de KM no AIRBAG ainda depende de confirmar a codificação (falta um airbag com KM anotada do mesmo carro). No painel a correção já é aplicada.");
-  }
+  // GRAVAÇÃO REAL: painel e airbag têm o código de proteção decifrado.
+  // Corrige numa cópia (original nunca tocado) e baixa o arquivo corrigido.
+  const r=(restState.slot==="painel")?psaCorrigirKm(restState.buf,nova):airCorrigirKm(restState.buf,nova);
+  const nomeSaida=restState.nome.replace(/\.bin$/i,"")+"_km"+nova+"_corrigido.bin";
+  const dl=await baixar(nomeSaida,r.buffer);
+  await regAdicionar("Restaurar KM ("+restState.slot+")",restState.res.perfil.modulo+" · "+fmtKm(r.de)+" → "+fmtKm(nova)+" · "+motivo,
+    {arquivo:restState.nome,arquivoSaida:nomeSaida,kmAntes:r.de,kmNova:nova,fonte,motivo,registrosAlterados:r.alterados,metodo:"CRC-32 (verificado byte a byte)"});
+  const detalhe=(restState.slot==="painel")?" (o contador secundário ficou intacto)":"";
+  const base="Quilometragem corrigida ("+fmtKm(r.de)+" → "+fmtKm(nova)+"). Foram reescritos "+r.alterados+" registros do anel"+detalhe+". O arquivo original NÃO foi alterado.";
+  if(dl.ok&&dl.zip) alert(base+"\n\nBaixado como "+nomeSaida.replace(/\.bin$/i,"")+".zip — o arquivo .bin corrigido está dentro do zip (o navegador de teste só entrega em zip). Descompacte e grave o .bin no módulo pela sua ferramenta de bancada.");
+  else if(dl.ok) alert(base+"\n\nArquivo baixado: "+nomeSaida+". Grave-o no módulo pela sua ferramenta de bancada.");
+  else alert(base+"\n\nO download não foi concluído ("+dl.motivo+"). No programa instalável (.exe) o arquivo é salvo direto, sem zip.");
 });
 
-/* ========== AIRBAG — finalizar reparo (crash data) ========== */
+/* ========== AIRBAG — finalizar reparo (crash data) ==========
+   IMPORTANTE: a localização da crash data do airbag ainda NÃO está mapeada
+   (o que se pensava ser crash data eram os registros de KM). Mapear exige um
+   dump de airbag efetivamente BATIDO para comparar. Por segurança, esta aba
+   NÃO modifica o arquivo — apenas registra a intenção com a declaração. */
 let airState=null;
 const inpAir=ligarDrop(document.getElementById("dropAir"),f=>lerArquivo(f,b=>{
   const slot=detectarPerfil(b);
   if(slot!=="airbag"){ alert("Este arquivo não é um módulo de airbag (esperado 32 KB)."); return; }
-  const res=analisar(slot,b); const colisao=airColisao(b); airState={nome:f.name,res,buf:b,colisao};
+  const res=analisar(slot,b); airState={nome:f.name,res,buf:b};
   document.getElementById("airDrop").hidden=true;document.getElementById("airForm").hidden=false;
   document.getElementById("airMod").textContent=res.perfil.modulo;
   document.getElementById("airVin").textContent=res.vin;
@@ -579,10 +610,7 @@ function validarAir(){
   const decl=document.getElementById("airDecl").checked;
   const reparo=document.getElementById("airReparo").value.trim();
   const alerta=document.getElementById("airAlerta");
-  let av="";
-  if(airState) av+= airState.colisao
-    ? '<div class="aviso" style="margin-top:10px"><b>Colisão registrada neste airbag.</b> A limpeza vai apagar os 12 registros de crash data e devolver o módulo ao estado "ok".</div>'
-    : '<div class="aviso" style="margin-top:10px">Este airbag <b>não tem colisão registrada</b> (já está limpo). A operação não muda nada.</div>';
+  let av='<div class="aviso" style="margin-top:10px"><b>Localização da crash data ainda não mapeada.</b> Falta um dump de airbag batido para comparar. Por segurança, esta operação ainda não modifica o arquivo — só registra a declaração.</div>';
   if(!os) av+='<div class="aviso" style="margin-top:10px">Vincule uma OS antes de finalizar.</div>';
   alerta.innerHTML=av;
   document.getElementById("btnAirbag").disabled = !(decl && reparo && os);
@@ -592,17 +620,10 @@ document.getElementById("airReparo").addEventListener("input",validarAir);
 document.getElementById("airTrocar").addEventListener("click",()=>inpAir.click());
 document.getElementById("btnAirbag").addEventListener("click",async()=>{
   const reparo=document.getElementById("airReparo").value.trim();
-  // LIMPEZA REAL do crash data (offsets reais mapeados), numa cópia. Só chega
-  // aqui com a declaração de reparo físico marcada. O original nunca é tocado.
-  const limpo=airLimparCrash(airState.buf);
-  const nomeSaida=airState.nome.replace(/\.bin$/i,"")+"_crash_limpo.bin";
-  const dl=await baixar(nomeSaida,limpo);
-  await regAdicionar("Finalizar reparo airbag (limpar crash data)",airState.res.perfil.modulo+" · "+airState.res.vin+" · reparo declarado",
-    {arquivo:airState.nome,arquivoSaida:nomeSaida,vin:airState.res.vin,reparoFisico:true,reparoDescricao:reparo,colisaoAntes:airState.colisao,regioes:AIR_CRASH_REG.length});
-  const base="Crash data limpo — foram zerados os 12 registros de colisão (padrão de fábrica). O arquivo original NÃO foi alterado.";
-  if(dl.ok&&dl.zip) alert(base+"\n\nBaixado como "+nomeSaida.replace(/\.bin$/i,"")+".zip — o .bin limpo está dentro do zip. Descompacte e grave no módulo pela sua ferramenta de bancada. Só é seguro porque o reparo físico foi declarado.");
-  else if(dl.ok) alert(base+"\n\nArquivo baixado: "+nomeSaida+". Grave-o no módulo — só é seguro porque o reparo físico foi declarado.");
-  else alert(base+"\n\nO download não foi concluído ("+dl.motivo+"). No programa instalável (.exe) o arquivo é salvo direto.");
+  // NÃO modifica o arquivo: a crash data do airbag ainda não foi mapeada.
+  await regAdicionar("Finalizar reparo airbag (crash data pendente de mapeamento)",airState.res.perfil.modulo+" · "+airState.res.vin+" · reparo declarado",
+    {arquivo:airState.nome,vin:airState.res.vin,reparoFisico:true,reparoDescricao:reparo});
+  alert("Declaração de reparo físico registrada. A limpeza da crash data ainda NÃO é aplicada: a localização exata dela no airbag depende de um dump de airbag batido para mapear. O arquivo não foi modificado.");
 });
 
 /* ========== LAUDO ========== */

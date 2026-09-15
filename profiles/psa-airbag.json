@@ -4,23 +4,17 @@
   "modulo": "airbag",
   "memoria": "EEPROM 95256",
   "tamanho": 32768,
-  "confianca": "parcial",
+  "confianca": "confirmado",
   "campos": {
     "vin": { "offset": 19510, "tamanho": 17, "tipo": "ascii", "confianca": "confirmado" },
-    "km":  { "offset": 326, "tamanho": 2, "endian": "le", "fator": 1, "estrutura": "anel-de-registros", "confianca": "preliminar" }
+    "km":  { "estrutura": "anel-airbag-psa", "motor": "src/core/psa.js", "fator": 1, "endian": "le", "confianca": "confirmado" }
   },
-  "crash": {
-    "regioes": [
-      { "offset": 15466, "tamanho": 14 }, { "offset": 15586, "tamanho": 14 },
-      { "offset": 15706, "tamanho": 14 }, { "offset": 15874, "tamanho": 14 },
-      { "offset": 16442, "tamanho": 14 }, { "offset": 17138, "tamanho": 14 },
-      { "offset": 17258, "tamanho": 14 }, { "offset": 22642, "tamanho": 13 },
-      { "offset": 22882, "tamanho": 14 }, { "offset": 22978, "tamanho": 14 },
-      { "offset": 23666, "tamanho": 14 }, { "offset": 24330, "tamanho": 14 }
-    ],
-    "padrao": "d343b576000000000000000000",
-    "confianca": "confirmado",
-    "obs": "12 registros de colisao; ao resetar, cada um vira D3 43 B5 76 seguido de zeros. Offsets em decimal (0x3C6A, 0x3CE2, ...). Ver descobertas-basalt.md secao 15 set."
+  "checksum": {
+    "tipo": "crc32-refletido-por-registro (airbag)",
+    "poly": "0xEDB88320",
+    "constanteXor": "0xD343B576",
+    "janela": "3 bytes de KM + 1 byte 0x00; hash gravado em big-endian",
+    "status": "decifrado (15 set 2026) com antes/depois do mesmo carro; implementado em src/core/psa.js (lerKmAirbag/corrigirKmAirbag)"
   },
-  "observacoes": "VIN confirmado em 0x4C36 (19510). Crash data mapeada (12 regioes) do par original/reset. KM em anel de registros; codificacao ainda preliminar (falta airbag com KM anotada do mesmo carro). Gravacao de KM pendente."
+  "observacoes": "VIN confirmado em 0x4C36 (19510). A KM fica num ANEL de registros [hash 4b BE][km 3b LE x1], espalhados pelo dump (nao alinhados); leitura/escrita via src/core/psa.js. Codigo de protecao decifrado e provado byte a byte. IMPORTANTE: os 12 registros que antes se supunha serem 'crash data' sao na verdade o anel de KM (o arquivo RESET tinha zerado a KM, nao a colisao). A CRASH DATA do airbag ainda NAO esta mapeada — depende de um dump de airbag efetivamente BATIDO para comparar."
 }

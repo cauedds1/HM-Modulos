@@ -10,7 +10,8 @@
 | # | Pendência | Quem resolve | O que trava |
 | --- | --- | --- | --- |
 | **P1** | Dumps reais de BCCM e airbag (e injeção) com KM e VIN conhecidos | Mecânico | **Parcial** — recebidos dumps de Basalt e C3, incluindo **antes/depois de painel com KM conhecida**. Leitura/escrita do painel resolvidas. Faltam Aircross e airbags com KM anotada. |
-| **P1b** | Quebrar o checksum de 4 bytes por registro do anel de KM (BCCM) | Eu (com os dumps) | ~~Gravar KM~~ **RESOLVIDO (15 set)** — é CRC-32 refletido numa janela específica + XOR `0xE38A6876`. Provado byte a byte. Ver `descobertas-basalt.md` e `src/core/psa.js`. Falta só a codificação da KM do **airbag**. |
+| **P1b** | Quebrar o checksum do anel de KM (BCCM **e airbag**) | Eu (com os dumps) | ~~Gravar KM~~ **RESOLVIDO (15 set)** — painel: CRC-32 refletido + XOR `0xE38A6876`; airbag: mesmo CRC-32 + XOR `0xD343B576` (hash BE). Ambos provados byte a byte. Sincronismo de KM já funciona. Ver `descobertas-basalt.md` e `src/core/psa.js`. |
+| **P1c** | Mapear a **crash data** do airbag | Mecânico | Precisa de um dump de airbag **batido** (com colisão registrada). O que se pensava ser crash data eram os registros de KM. Só isso trava o "finalizar reparo de airbag". |
 | **P2** | O SistemaHMMecanica existe em outro lugar (qual schema?) ou o modelo da OS é definido aqui? | Cliente | Integração com a OS (toda a Fase 2). |
 
 ## Não travam começar, mas precisam de resposta
