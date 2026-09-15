@@ -37,10 +37,16 @@ HM Mecânica. O usuário não é técnico — explique tudo em português simple
 Etapa **E3** (virar programa instalável). O motor está pronto e testado. Falta:
 migrar as telas para o programa, login com senha na UI, empacotar o `.exe`.
 
-**Bloqueio principal (E1):** gravar KM no PSA depende de decifrar o **código de
-proteção** (checksum-por-registro), que exige material do mecânico: o **antes/
-depois de um painel com KM conhecida**. Sem isso, o motor corrige mas o perfil
-PSA não tem os checksums (`aceitavel:false`). Detalhe em `descobertas-basalt.md`.
+**★ Bloqueio principal (E1/P1b): RESOLVIDO (15 set 2026).** O código de proteção
+do painel PSA foi decifrado com o material do mecânico (antes/depois de um painel
+C3 com KM conhecida). É **CRC-32 refletido** (poly `0xEDB88320`) sobre a janela
+`3 bytes de KM + 7 zeros`, XOR `0xE38A6876`. A KM vive num **anel de registros**
+de 16 bytes (o antigo offset `0x4BA0` estava errado). Leitura e escrita do painel
+prontas e **provadas byte a byte** em `src/core/psa.js` (`lerKmPainel`,
+`corrigirKmPainel`) — reproduzem o arquivo da ferramenta de referência. Detalhe
+em `descobertas-basalt.md` (seção "15 set"). **Falta ainda:** a codificação da KM
+do **airbag** (precisa de airbag com KM anotada do mesmo carro); a crash data do
+airbag já está mapeada (12 regiões, offsets reais no perfil `psa-airbag`).
 
 ## Convenções e regras (importantes)
 

@@ -8,7 +8,14 @@
   "assinatura": { "janela": 2736, "janelaTam": 32, "texto": "BCCM" },
   "campos": {
     "vin": { "offset": 2816, "tamanho": 17, "tipo": "ascii" },
-    "km":  { "offset": 19360, "tamanho": 3, "endian": "le", "fator": 10, "estrutura": "anel-de-registros", "confianca": "confirmado" }
+    "km":  { "estrutura": "anel-de-registros-psa", "motor": "src/core/psa.js", "fator": 10, "endian": "le", "confianca": "confirmado" }
   },
-  "observacoes": "Cobre C3, Aircross e Basalt (mesmo layout). KM em anel de registros com codigo de protecao de 4 bytes por registro ainda nao decodificado (P1b). Leitura confirmada; gravacao pendente."
+  "checksum": {
+    "tipo": "crc32-refletido-por-registro",
+    "poly": "0xEDB88320",
+    "constanteXor": "0xE38A6876",
+    "janela": "3 bytes de KM + 7 bytes 0x00",
+    "status": "decifrado (P1b resolvido 15 set 2026); implementado em src/core/psa.js"
+  },
+  "observacoes": "Cobre C3, Aircross e Basalt (mesmo layout). A KM fica num ANEL de registros de 16 bytes (nao num offset unico; o antigo 0x4BA0 estava errado). Leitura e escrita via src/core/psa.js (lerKmPainel/corrigirKmPainel), que so mexe no odometro principal e preserva o contador secundario. Codigo de protecao decifrado: CRC-32 refletido + XOR. Provado byte a byte contra dump de referencia."
 }

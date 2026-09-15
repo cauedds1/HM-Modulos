@@ -3,14 +3,14 @@
 > Lista viva do que ainda precisa de resposta antes ou durante a construção.
 > Atualizada a cada sessão de estudo.
 
-Última atualização: 27 ago 2026
+Última atualização: 15 set 2026
 
 ## Travam a entrega
 
 | # | Pendência | Quem resolve | O que trava |
 | --- | --- | --- | --- |
-| **P1** | Dumps reais de BCCM e airbag (e injeção) com KM e VIN conhecidos | Mecânico | **Parcial** — recebidos 4 dumps de um Basalt; leitura de VIN/KM resolvida. Faltam C3 e Aircross, e mais pares para validar. Ver `descobertas-basalt.md`. |
-| **P1b** | Quebrar o checksum de 4 bytes por registro do anel de KM (BCCM e airbag) | Eu (com os dumps) | Gravar KM. Sem isso o software só lê, não escreve. É o próximo trabalho técnico. |
+| **P1** | Dumps reais de BCCM e airbag (e injeção) com KM e VIN conhecidos | Mecânico | **Parcial** — recebidos dumps de Basalt e C3, incluindo **antes/depois de painel com KM conhecida**. Leitura/escrita do painel resolvidas. Faltam Aircross e airbags com KM anotada. |
+| **P1b** | Quebrar o checksum de 4 bytes por registro do anel de KM (BCCM) | Eu (com os dumps) | ~~Gravar KM~~ **RESOLVIDO (15 set)** — é CRC-32 refletido numa janela específica + XOR `0xE38A6876`. Provado byte a byte. Ver `descobertas-basalt.md` e `src/core/psa.js`. Falta só a codificação da KM do **airbag**. |
 | **P2** | O SistemaHMMecanica existe em outro lugar (qual schema?) ou o modelo da OS é definido aqui? | Cliente | Integração com a OS (toda a Fase 2). |
 
 ## Não travam começar, mas precisam de resposta
@@ -50,3 +50,8 @@
 - 4 dumps reais (27 ago) — Basalt, mesmo VIN, 2 painéis (25.100 e 85.219 km) +
   2 airbags. Permitiram mapear VIN e KM por comparação diferencial. Análise em
   `descobertas-basalt.md`. **Dumps guardados fora do repositório.**
+- Material do mecânico (15 set) — painel C3 **antes/depois com KM conhecida**
+  (157.383 → 60.200), airbag original/reset e airbag com KM/VIN anotados.
+  **Permitiu quebrar o código de proteção da PSA (P1b) e mapear a crash data
+  do airbag.** Análise na seção "15 set" de `descobertas-basalt.md`. Dumps fora
+  do repositório.

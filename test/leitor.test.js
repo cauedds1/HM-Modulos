@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const leitor = require('../src/core/leitor');
+const psa = require('../src/core/psa');
 const { carregarPerfis, detectar } = require('../src/core/perfil');
 
 const perfis = carregarPerfis();
@@ -13,10 +14,10 @@ function painelSintetico({ vin = '935CPFCA5SB556938', km = 25100 } = {}) {
   const b = Buffer.alloc(65536, 0);
   b.write('BCCM', 0x0ac6, 'latin1'); // assinatura, na janela 0x0AB0..
   b.write(vin, 0x0b00, 'latin1'); // VIN em ASCII
-  const kmx10 = km * 10; // painel guarda KM ×10 little-endian
-  b[0x4ba0] = kmx10 & 0xff;
-  b[0x4ba1] = (kmx10 >> 8) & 0xff;
-  b[0x4ba2] = (kmx10 >> 16) & 0xff;
+  // KM real: anel de registros PSA (16 bytes cada, com codigo de protecao).
+  // Planta alguns registros do odometro principal, como no dump real.
+  let off = 0x5000;
+  for (let i = 0; i < 3; i++) { psa.montarRegistroKm(km).copy(b, off); off += 0x30; }
   return b;
 }
 

@@ -140,3 +140,82 @@ por registro.
   **conhecida/anotada** (idealmente o mesmo airbag em KMs diferentes). Até lá,
   o app marca a KM do airbag como "leitura preliminar" (honesto). VIN do
   airbag continua confirmado.
+
+---
+
+## Atualização 15 set 2026 — ★ CÓDIGO DE PROTEÇÃO DECIFRADO (P1b resolvido) ★
+
+Material novo do mecânico: **antes/depois de um painel C3 com KM conhecida**
+(original ~157.383 km → gravado 60.200 km por ferramenta de referência), mais
+airbags original/reset e um airbag com KM/VIN anotados. Isso permitiu, enfim,
+**quebrar o checksum próprio da PSA** por análise diferencial. Tudo abaixo está
+**verificado em código** (`src/core/psa.js`, testes em `test/psa.test.js`) e
+provado ponta a ponta.
+
+### Estrutura real da KM no painel (corrige o que se supunha antes)
+A KM **não** fica no offset `0x4BA0` (aquela era uma leitura antiga incorreta —
+lá o valor nem é a KM). A KM vive num **anel de registros de 16 bytes**:
+
+```
+[0..3]  hash de 4 bytes (o "código de proteção")   — little-endian
+[4..5]  00 00
+[6]     dígito verificador = (km0+km1+km2) & 0xFF   (soma dos 3 bytes da KM)
+[7..11] 00 00 00 00 00
+[12..14] KM × 10, little-endian   (ex.: 60.200 km → 602000 → 90 2F 09)
+[15]    00
+```
+
+O painel guarda **dois contadores** em anéis distintos:
+- **odômetro principal** (a KM real, alta) — é o que se corrige;
+- **contador secundário** (valores baixos, ~137) — **não se mexe**.
+A ferramenta de referência só reescreveu os registros do odômetro principal
+(36 registros) e deixou os 8 do secundário intactos. Nosso motor faz igual.
+
+### A FÓRMULA DO HASH (o P1b)
+```
+hash = CRC32_refletido( [km0, km1, km2, 0,0,0,0,0,0,0] )  XOR  0xE38A6876
+```
+- `CRC32_refletido` = **CRC-32 padrão** (poly `0xEDB88320`, o mesmo do ZIP/PNG),
+  init=0, xorout=0;
+- entrada = os 3 bytes da KM (ordem de memória) **+ 7 bytes 0x00** (10 bytes);
+- resultado gravado em **little-endian** nos bytes `[0..3]` do registro.
+
+Ou seja: a PSA usou o **CRC-32 clássico**, só que numa janela específica com
+uma constante XOR — não é algoritmo exótico. O que faltava era o material para
+descobrir a janela.
+
+**Como foi quebrado:** colhidos 18 registros (km→hash) do histórico do anel;
+provado por álgebra GF(2) que o hash é **linear** (tipo CRC); recuperado o
+polinômio `0xEDB88320` pela recorrência do LFSR sobre 8 bits consecutivos;
+achada a janela (7 bytes de enchimento) e a constante `0xE38A6876` por varredura.
+
+**Validação (nível "prova"):**
+- hash confere em **44/44 registros** dos dois dumps (original e modificado);
+- `corrigirKmPainel(original, 60200)` reproduz o arquivo da ferramenta de
+  referência **byte a byte (0 diferenças)** — motor de leitura E escrita do
+  painel provado ponta a ponta.
+
+### Airbag — offsets reais (do par original/reset)
+- **VIN do airbag: offset `0x4C36`** (17 ASCII). *(Antes supunha-se `0x4C5E` —
+  corrigido.)*
+- **Crash data:** 12 registros de 14 bytes nas posições
+  `0x3C6A, 0x3CE2, 0x3D5A, 0x3E02, 0x403A, 0x42F2, 0x436A, 0x5872, 0x5962,
+  0x59C2, 0x5C72, 0x5F0A`.
+  - Cada registro de colisão tem marcadores constantes (`66 02 00` e `15 15`) e
+    um índice de evento crescente no byte `[4]`.
+  - Ao **resetar**, cada registro vira o padrão fixo **`D3 43 B5 76` seguido de
+    zeros** (não é preenchimento com um único byte — é um cabeçalho fixo, provável
+    CRC do registro vazio). É esse padrão que a limpeza deve gravar.
+- **KM do airbag:** ainda a confirmar a codificação (o airbag anotado é de outro
+  carro — "Paulo", VIN `935CDNFXDRB522343`, KM 60.200). Segue "preliminar".
+
+### O que isto destrava
+- **E1 (quebrar proteção): CONCLUÍDO** para o painel PSA (C3/Aircross/Basalt).
+- **E2 (escrita) do painel: pronto e provado** — `psa.lerKmPainel` e
+  `psa.corrigirKmPainel`.
+- **Airbag (E5):** offsets reais de VIN e crash data mapeados; falta ligar o
+  perfil e confirmar a KM do airbag.
+
+> Nota de método: nenhum dump entrou no repositório. Os vetores de teste usam a
+> KM 60.200 (valor já citado pelo próprio cliente) e valores derivados da
+> fórmula — nada que identifique um veículo.

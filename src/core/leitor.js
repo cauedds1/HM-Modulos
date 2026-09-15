@@ -9,6 +9,7 @@
  */
 
 const codec = require('./codec');
+const psa = require('./psa');
 
 const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/;
 const KM_MAX_PLAUSIVEL = 2000000;
@@ -36,6 +37,11 @@ function lerVin(buf, campo) {
  * é o valor bruto dividido pelo fator (ex.: painel PSA guarda 251000 → 25100).
  */
 function lerKm(buf, campo) {
+  // Painel PSA: a KM vive num anel de registros com codigo de protecao proprio
+  // (decifrado — ver src/core/psa.js). Le o odometro principal do anel.
+  if (campo.estrutura === 'anel-de-registros-psa') {
+    return psa.lerKmPainel(buf).km; // pode ser null se nao houver registros validos
+  }
   const bruto = codec.lerReplica(
     buf,
     { offset: campo.offset, tamanho: campo.tamanho, endian: campo.endian || 'le', encoding: 'raw' }

@@ -6,8 +6,21 @@
   "tamanho": 32768,
   "confianca": "parcial",
   "campos": {
-    "vin": { "offset": 19550, "tamanho": 17, "tipo": "ascii", "confianca": "confirmado" },
+    "vin": { "offset": 19510, "tamanho": 17, "tipo": "ascii", "confianca": "confirmado" },
     "km":  { "offset": 326, "tamanho": 2, "endian": "le", "fator": 1, "estrutura": "anel-de-registros", "confianca": "preliminar" }
   },
-  "observacoes": "VIN confirmado. KM em anel de registros com hash de 4 bytes; leitura preliminar. Gravacao pendente."
+  "crash": {
+    "regioes": [
+      { "offset": 15466, "tamanho": 14 }, { "offset": 15586, "tamanho": 14 },
+      { "offset": 15706, "tamanho": 14 }, { "offset": 15874, "tamanho": 14 },
+      { "offset": 16442, "tamanho": 14 }, { "offset": 17138, "tamanho": 14 },
+      { "offset": 17258, "tamanho": 14 }, { "offset": 22642, "tamanho": 13 },
+      { "offset": 22882, "tamanho": 14 }, { "offset": 22978, "tamanho": 14 },
+      { "offset": 23666, "tamanho": 14 }, { "offset": 24330, "tamanho": 14 }
+    ],
+    "padrao": "d343b576000000000000000000",
+    "confianca": "confirmado",
+    "obs": "12 registros de colisao; ao resetar, cada um vira D3 43 B5 76 seguido de zeros. Offsets em decimal (0x3C6A, 0x3CE2, ...). Ver descobertas-basalt.md secao 15 set."
+  },
+  "observacoes": "VIN confirmado em 0x4C36 (19510). Crash data mapeada (12 regioes) do par original/reset. KM em anel de registros; codificacao ainda preliminar (falta airbag com KM anotada do mesmo carro). Gravacao de KM pendente."
 }
