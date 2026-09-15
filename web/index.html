@@ -371,9 +371,15 @@ function zipUmArquivo(nome,bytes){
   let total=0;for(const p of parts)total+=p.length;const out=new Uint8Array(total);let o=0;for(const p of parts){out.set(p,o);o+=p.length;}
   return out;
 }
-/* Download adaptativo: no app publicado usa a capacidade oficial (zip);
-   no navegador comum e no .exe, download direto do .bin. Nunca toca no original. */
+/* Download adaptativo, na ordem: (1) programa instalável (.exe) → salva .bin
+   nativo pela ponte segura; (2) app publicado → capacidade oficial em .zip;
+   (3) navegador comum → download direto do .bin. Nunca toca no original. */
 async function baixar(nome,bytes){
+  // (1) .exe (Electron): SaveDialog nativo, arquivo .bin de verdade
+  if(window.motor&&typeof window.motor.salvar==="function"){
+    try{ const r=await window.motor.salvar(nome,bytes); return (r&&r.salvo)?{ok:true,zip:false,caminho:r.caminho}:{ok:false,motivo:"cancelado"}; }
+    catch(e){ return {ok:false,motivo:"erro ao salvar"}; }
+  }
   if(window.claude&&typeof window.claude.use==="function"){
     let dl=null; try{dl=await window.claude.use("downloads");}catch(e){}
     if(dl){

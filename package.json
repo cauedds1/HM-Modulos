@@ -7,11 +7,13 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "build:win": "electron-builder --win"
   },
   "license": "UNLICENSED",
   "devDependencies": {
-    "electron": "^33.4.11"
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
   },
   "build": {
     "appId": "com.hmmecanica.modulos",
