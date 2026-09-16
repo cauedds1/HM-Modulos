@@ -46,6 +46,13 @@ Abra no navegador: `SUA-URL/api/saude` — deve responder:
 Se `banco: true`, o Postgres está conectado. Abrir só a URL (sem `/api/saude`)
 mostra o app.
 
+### Se der erro de "electron" / "libglib" no deploy
+Isso acontecia quando a Railway rodava o programa de **desktop** por engano. Já
+foi corrigido: o `npm start` agora roda o **servidor** (`node server/index.js`),
+e o desktop ficou em `npm run app`. Se ainda aparecer, confirme que a Railway
+está no **último commit** do branch e faça **Redeploy**. (Opcional, para o build
+ficar mais leve: em Variables, adicione `ELECTRON_SKIP_BINARY_DOWNLOAD=1`.)
+
 ## O que a API já faz (a base dos créditos)
 
 | Rota | O que faz |

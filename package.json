@@ -5,7 +5,8 @@
   "description": "Ferramenta de bancada para leitura, sincronizacao e reparo de dumps de modulos automotivos (BCCM / airbag) PSA. Nome do produto a definir (P3).",
   "main": "src/main/main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "node server/index.js",
+    "app": "electron .",
     "start:server": "node server/index.js",
     "test": "node --test test/*.test.js",
     "dist": "electron-builder",
