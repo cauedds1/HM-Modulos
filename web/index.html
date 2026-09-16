@@ -150,17 +150,32 @@
 
 <!-- ===================== OVERLAY LOGIN ===================== -->
 <div class="overlay" id="ovLogin">
+  <div class="modal" id="loginModal"><!-- preenchido por JS: primeiro acesso ou login --></div>
+</div>
+
+<!-- ===================== OVERLAY USUÁRIOS (só responsável) ===================== -->
+<div class="overlay" id="ovUsers" hidden>
   <div class="modal">
-    <h3>Entrar</h3>
-    <p class="msub">Identifique o operador. Cada operação fica registrada no nome de quem a fez.</p>
-    <div class="campo"><label>Nome do operador</label><input id="inNome" placeholder="Ex.: João" autocomplete="off"></div>
-    <div class="papeis">
-      <label class="papel"><input type="radio" name="papel" value="consulta"><span><span class="pt">Consulta</span><span class="pd"> — só visualiza e diagnostica.</span></span></label>
-      <label class="papel"><input type="radio" name="papel" value="operador" checked><span><span class="pt">Operador</span><span class="pd"> — diagnostica, repara e sincroniza.</span></span></label>
-      <label class="papel"><input type="radio" name="papel" value="responsavel"><span><span class="pt">Responsável técnico</span><span class="pd"> — tudo, inclusive restaurar quilometragem e emitir laudo.</span></span></label>
+    <h3>Usuários</h3>
+    <p class="msub">O responsável técnico cadastra e remove operadores. Cada um entra com a própria senha; toda operação fica registrada no nome de quem a fez.</p>
+    <div id="usersLista"></div>
+    <div style="border-top:1px solid var(--linha);margin:14px 0;padding-top:14px">
+      <div class="rot" style="margin-bottom:8px">Novo usuário</div>
+      <div class="campos2">
+        <div class="campo"><label>Nome</label><input id="nuNome" autocomplete="off" placeholder="Ex.: João"></div>
+        <div class="campo"><label>Senha (mín. 4)</label><input id="nuSenha" type="password" autocomplete="new-password"></div>
+      </div>
+      <div class="campo"><label>Permissão</label><select id="nuPapel">
+        <option value="consulta">Consulta — só visualiza e diagnostica</option>
+        <option value="operador" selected>Operador — diagnostica, repara e sincroniza</option>
+        <option value="responsavel">Responsável técnico — tudo, inclusive restaurar KM e laudo</option>
+      </select></div>
+      <div id="nuAlerta"></div>
     </div>
-    <button class="btn" id="btnEntrar" style="width:100%">Entrar</button>
-    <p class="nota" style="margin-top:12px">Protótipo: no produto final o acesso tem senha e é gerenciado pelo responsável.</p>
+    <div class="acoes">
+      <button class="btn" id="btnAddUser" type="button">Adicionar usuário</button>
+      <button class="btn sec" id="btnFecharUsers" type="button">Fechar</button>
+    </div>
   </div>
 </div>
 
@@ -198,7 +213,8 @@
     <button class="navbtn" data-aba="veic" data-min="consulta"><span class="ic">🚗</span>Veículo<span class="tag">fase 3</span></button>
     <div class="usuario">
       <div class="nm" id="uNome">—</div><div class="pp" id="uPapel">—</div>
-      <button class="sair" id="btnSair" type="button">trocar operador</button>
+      <button class="sair" id="btnUsuarios" type="button" hidden>gerenciar usuários</button>
+      <button class="sair" id="btnSair" type="button">sair</button>
     </div>
   </nav>
 
@@ -693,18 +709,76 @@ function aplicarPermissoes(){
   document.querySelectorAll(".navbtn").forEach(b=>{ b.hidden=!pode(b.dataset.min); });
 }
 
-/* ========== LOGIN ========== */
-function mostrarLogin(){ document.getElementById("ovLogin").hidden=false; }
-function entrar(){
-  const nome=document.getElementById("inNome").value.trim()||"Operador";
-  const papel=(document.querySelector('input[name="papel"]:checked')||{}).value||"operador";
+/* ========== AUTENTICAÇÃO (senha real, PBKDF2 nativo do navegador) ========== */
+function _hex(u){return [...u].map(x=>x.toString(16).padStart(2,"0")).join("");}
+function _unhex(s){const u=new Uint8Array(s.length/2);for(let i=0;i<u.length;i++)u[i]=parseInt(s.substr(i*2,2),16);return u;}
+async function hashSenha(senha){
+  const sal=crypto.getRandomValues(new Uint8Array(16));
+  const key=await crypto.subtle.importKey("raw",new TextEncoder().encode(senha),"PBKDF2",false,["deriveBits"]);
+  const bits=await crypto.subtle.deriveBits({name:"PBKDF2",salt:sal,iterations:150000,hash:"SHA-256"},key,256);
+  return "pbkdf2$150000$"+_hex(sal)+"$"+_hex(new Uint8Array(bits));
+}
+async function verificarSenha(senha,hash){
+  try{const [alg,it,salHex,dkHex]=String(hash).split("$");if(alg!=="pbkdf2")return false;
+    const sal=_unhex(salHex),esp=_unhex(dkHex);
+    const key=await crypto.subtle.importKey("raw",new TextEncoder().encode(senha),"PBKDF2",false,["deriveBits"]);
+    const bits=await crypto.subtle.deriveBits({name:"PBKDF2",salt:sal,iterations:Number(it),hash:"SHA-256"},key,esp.length*8);
+    const dk=new Uint8Array(bits);if(dk.length!==esp.length)return false;let d=0;for(let i=0;i<dk.length;i++)d|=dk[i]^esp[i];return d===0;
+  }catch(e){return false;}
+}
+const USERS_KEY="hm-usuarios-v1";
+function usuarios(){try{return JSON.parse(localStorage.getItem(USERS_KEY)||"[]");}catch(e){return[];}}
+function salvarUsuarios(l){try{localStorage.setItem(USERS_KEY,JSON.stringify(l));}catch(e){}}
+function alertaBox(t){return '<div class="veto" style="margin-top:10px">'+esc(t)+'</div>';}
+
+/* ========== LOGIN / PRIMEIRO ACESSO ========== */
+function mostrarLogin(){ renderLogin(); document.getElementById("ovLogin").hidden=false; }
+function renderLogin(){
+  const modal=document.getElementById("loginModal"), us=usuarios();
+  if(us.length===0){
+    modal.innerHTML='<h3>Primeiro acesso</h3>'+
+      '<p class="msub">Crie o <b>responsável técnico</b> (o dono / chefe da oficina). Ele controla os acessos e é o único que restaura KM e emite laudo.</p>'+
+      '<div class="campo"><label>Nome</label><input id="lgNome" autocomplete="off" placeholder="Seu nome"></div>'+
+      '<div class="campos2"><div class="campo"><label>Senha (mín. 4)</label><input id="lgSenha" type="password" autocomplete="new-password"></div>'+
+      '<div class="campo"><label>Repetir senha</label><input id="lgSenha2" type="password" autocomplete="new-password"></div></div>'+
+      '<div id="lgAlerta"></div><button class="btn" id="lgBtn" style="width:100%">Criar e entrar</button>';
+    document.getElementById("lgBtn").addEventListener("click",criarResponsavel);
+  } else {
+    const opts=us.map(u=>'<option value="'+esc(u.nome)+'">'+esc(u.nome)+' — '+PAPEL_NOME[u.papel]+'</option>').join("");
+    modal.innerHTML='<h3>Entrar</h3><p class="msub">Cada operação fica registrada no nome de quem a fez.</p>'+
+      '<div class="campo"><label>Usuário</label><select id="lgNome">'+opts+'</select></div>'+
+      '<div class="campo"><label>Senha</label><input id="lgSenha" type="password" autocomplete="current-password"></div>'+
+      '<div id="lgAlerta"></div><button class="btn" id="lgBtn" style="width:100%">Entrar</button>';
+    document.getElementById("lgBtn").addEventListener("click",fazerLogin);
+    document.getElementById("lgSenha").addEventListener("keydown",e=>{if(e.key==="Enter")fazerLogin();});
+  }
+}
+async function criarResponsavel(){
+  const nome=document.getElementById("lgNome").value.trim();
+  const s1=document.getElementById("lgSenha").value, s2=document.getElementById("lgSenha2").value;
+  const al=document.getElementById("lgAlerta");
+  if(!nome){al.innerHTML=alertaBox("Informe o nome.");return;}
+  if(s1.length<4){al.innerHTML=alertaBox("A senha precisa de ao menos 4 caracteres.");return;}
+  if(s1!==s2){al.innerHTML=alertaBox("As senhas não conferem.");return;}
+  const hash=await hashSenha(s1);
+  salvarUsuarios([{nome,papel:"responsavel",hash,criadoEm:new Date().toISOString()}]);
+  entrarComo(nome,"responsavel");
+  regAdicionar("Primeiro acesso","Responsável técnico criado: "+nome,{nome});
+}
+async function fazerLogin(){
+  const nome=document.getElementById("lgNome").value;
+  const senha=document.getElementById("lgSenha").value;
+  const al=document.getElementById("lgAlerta");
+  const u=usuarios().find(x=>x.nome===nome);
+  if(!u||!(await verificarSenha(senha,u.hash))){ al.innerHTML=alertaBox("Usuário ou senha incorretos."); return; }
+  entrarComo(u.nome,u.papel);
+}
+function entrarComo(nome,papel){
   sessao={nome,papel};
   try{localStorage.setItem("hm-sessao",JSON.stringify(sessao));}catch(e){}
   document.getElementById("ovLogin").hidden=true;
   iniciarSessao();
 }
-document.getElementById("btnEntrar").addEventListener("click",entrar);
-document.getElementById("inNome").addEventListener("keydown",e=>{if(e.key==="Enter")entrar();});
 document.getElementById("btnSair").addEventListener("click",()=>{
   sessao=null;try{localStorage.removeItem("hm-sessao");}catch(e){}
   mostrarLogin();
@@ -712,10 +786,42 @@ document.getElementById("btnSair").addEventListener("click",()=>{
 function iniciarSessao(){
   document.getElementById("uNome").textContent=sessao.nome;
   document.getElementById("uPapel").textContent=PAPEL_NOME[sessao.papel];
+  document.getElementById("btnUsuarios").hidden = !pode("responsavel");
   aplicarPermissoes(); pintarOS();
-  // vai para a primeira aba permitida
   irPara("diag");
 }
+
+/* ========== GERENCIAR USUÁRIOS (só responsável) ========== */
+function pintarUsers(){
+  const box=document.getElementById("usersLista"), us=usuarios();
+  box.innerHTML=us.map(u=>'<div class="linha"><span class="val" style="text-align:left">'+esc(u.nome)+' <small>'+PAPEL_NOME[u.papel]+'</small></span>'+
+    (u.nome===sessao.nome?'<span class="rot">você</span>':'<button class="trocar" data-rem="'+esc(u.nome)+'" type="button">remover</button>')+'</div>').join("");
+  box.querySelectorAll("[data-rem]").forEach(b=>b.addEventListener("click",()=>removerUser(b.getAttribute("data-rem"))));
+}
+function removerUser(nome){
+  let us=usuarios();
+  const resp=us.filter(u=>u.papel==="responsavel");
+  if(resp.length<=1 && us.some(u=>u.nome===nome && u.papel==="responsavel")){ alert("Precisa haver ao menos um responsável técnico."); return; }
+  us=us.filter(u=>u.nome!==nome); salvarUsuarios(us); pintarUsers();
+  regAdicionar("Usuário removido",nome,{nome});
+}
+document.getElementById("btnUsuarios").addEventListener("click",()=>{ pintarUsers(); document.getElementById("nuAlerta").innerHTML=""; document.getElementById("ovUsers").hidden=false; });
+document.getElementById("btnFecharUsers").addEventListener("click",()=>{ document.getElementById("ovUsers").hidden=true; });
+document.getElementById("btnAddUser").addEventListener("click",async()=>{
+  const nome=document.getElementById("nuNome").value.trim();
+  const senha=document.getElementById("nuSenha").value;
+  const papel=document.getElementById("nuPapel").value;
+  const al=document.getElementById("nuAlerta");
+  if(!nome){al.innerHTML=alertaBox("Informe o nome.");return;}
+  if(usuarios().some(u=>u.nome===nome)){al.innerHTML=alertaBox("Já existe um usuário com esse nome.");return;}
+  if(senha.length<4){al.innerHTML=alertaBox("A senha precisa de ao menos 4 caracteres.");return;}
+  const hash=await hashSenha(senha);
+  const us=usuarios(); us.push({nome,papel,hash,criadoEm:new Date().toISOString()}); salvarUsuarios(us);
+  document.getElementById("nuNome").value=""; document.getElementById("nuSenha").value="";
+  al.innerHTML='<div class="aviso" style="margin-top:10px">Usuário "'+esc(nome)+'" criado.</div>';
+  pintarUsers();
+  regAdicionar("Usuário criado",nome+" ("+PAPEL_NOME[papel]+")",{nome,papel});
+});
 
 /* ========== TEMA ========== */
 (function(){const btn=document.getElementById("btnTema");let atual=null;try{atual=localStorage.getItem("hm-tema");}catch(e){}
@@ -734,5 +840,7 @@ document.getElementById("btnExportar").addEventListener("click",async()=>{
   try{await navigator.clipboard.writeText(JSON.stringify(regCarregar(),null,2));const b=document.getElementById("btnExportar");b.textContent="Copiado!";setTimeout(()=>b.textContent="Copiar registro",1500);}catch(e){}
 });
 pintarRegistro();
-if(sessao) iniciarSessao(); else mostrarLogin();
+// só reabre a sessão se o usuário ainda existir; senão, pede login/primeiro acesso
+if(sessao && usuarios().some(u=>u.nome===sessao.nome)) iniciarSessao();
+else { sessao=null; try{localStorage.removeItem("hm-sessao");}catch(e){} mostrarLogin(); }
 </script>
