@@ -149,7 +149,7 @@
 </style>
 
 <!-- ===================== OVERLAY LOGIN ===================== -->
-<div class="overlay" id="ovLogin">
+<div class="overlay" id="ovLogin" hidden>
   <div class="modal" id="loginModal"><!-- preenchido por JS: primeiro acesso ou login --></div>
 </div>
 
@@ -784,6 +784,7 @@ document.getElementById("btnSair").addEventListener("click",()=>{
   mostrarLogin();
 });
 function iniciarSessao(){
+  document.getElementById("ovLogin").hidden=true; // garante que a tela de login sai de cima
   document.getElementById("uNome").textContent=sessao.nome;
   document.getElementById("uPapel").textContent=PAPEL_NOME[sessao.papel];
   document.getElementById("btnUsuarios").hidden = !pode("responsavel");
