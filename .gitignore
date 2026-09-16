@@ -3,6 +3,10 @@ dist/
 out/
 *.log
 
+# Segredos do servidor (NUNCA versionar)
+.env
+.env.local
+
 # Dumps de modulos: nunca versionar.
 # Sao dados de veiculo real (VIN, quilometragem) e nao entram no repositorio.
 *.bin

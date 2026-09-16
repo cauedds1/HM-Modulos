@@ -1,0 +1,10 @@
+# Configuração de build/deploy para a Railway (Nixpacks).
+# O servidor precisa só do driver do Postgres (pg) — NÃO precisa do Electron.
+# Por isso instalamos sem as devDependencies (que têm o Electron, pesado e
+# usado só para gerar o .exe no Windows).
+
+[phases.install]
+cmds = ["npm install --omit=dev"]
+
+[start]
+cmd = "node server/index.js"

@@ -29,6 +29,11 @@ HM Mecânica. O usuário não é técnico — explique tudo em português simple
   C3/Aircross/Basalt; `psa-airbag`.
 - `src/main/` — Electron: `main.js` (processo principal + motor, IPC) e
   `preload.js` (ponte segura).
+- `server/` — **backend opcional** (Node puro + `pg`) para hospedar na Railway:
+  serve o app e oferece a API de **contas, créditos e registro central**
+  (Postgres). É a base da versão comercial (controle do dono, créditos à prova
+  de burla). Guia em `docs/servidor-railway.md`. A tela ainda usa armazenamento
+  local; ligá-la à API é a próxima etapa. Dumps nunca passam pelo servidor.
 - `web/index.html` — a interface (renderer), que roda também como teste no navegador.
 - `test/` — testes do motor. **Rodar: `npm test`** (ou `node --test test/*.test.js`).
 
